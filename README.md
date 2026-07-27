@@ -39,10 +39,10 @@ suite de tests ni linter configurados.
 | Esqueleto FastAPI + pgvector + tabla `code_chunks` | ✅ |
 | `POST /repos` — clonar, trocear, embeder e indexar | ✅ |
 | `GET /repos` · `DELETE /repos/{owner}/{repo}` | ✅ |
-| `POST /search` — recuperación híbrida (vectorial + léxica, fusión RRF) | ✅ |
+| `POST /search` — recuperación híbrida (vectorial + léxica, fusión RRF) | ✅ (ver [Resultados de recuperación](#resultados-de-recuperación) — no alcanza el 80% de acierto@5, y el híbrido queda por debajo del léxico solo en esa métrica) |
 | Frontend: selector de repo + búsqueda con citas | ✅ |
 | `POST /ask` — síntesis con LLM sobre los chunks | ⬜ |
-| Set de evaluación (10-15 preguntas con respuesta conocida) | ⬜ |
+| Set de evaluación (15 preguntas con respuesta conocida, varias con más de un archivo válido) | ✅ |
 
 **Por qué `/search` antes que `/ask`:** si la recuperación trae los fragmentos equivocados, ningún
 LLM lo arregla — solo lo disfraza. Tener la búsqueda expuesta por separado permite medir la calidad
@@ -59,6 +59,12 @@ preguntas de `backend/eval/uswap.json`, cuya respuesta correcta se verificó a m
 | Léxico (Postgres full-text) | 13% | 60% |
 | **Híbrido (RRF)** | **33%** | **53%** |
 
+El dato que hay que decir sin rodeos: en acierto@5 el híbrido (53%) queda **por debajo**
+del léxico solo (60%) — la fusión no superó a su propia mitad léxica en la métrica que
+más importa. Donde el híbrido sí gana con claridad es en acierto@1 (33% contra 13% del
+léxico). Combinar ambos rankers era el punto de construir RRF; en acierto@5, combinar
+salió peor que no combinar.
+
 La búsqueda vectorial sola falla porque un modelo de propósito general empareja mal
 preguntas en lenguaje natural contra código crudo, y la documentación en prosa gana
 el ranking por parecerse más a la pregunta. La mitad léxica aporta las anclas exactas
@@ -70,6 +76,16 @@ código-contra-código que ninguna fusión arregla) y solo 1 trae un `.md`. Como
 documentación no es lo que ocupa los primeros puestos, `DOC_WEIGHT` se dejó en `0.7`
 — subirle el peso de penalización no habría movido el número, solo habría ajustado
 contra ruido.
+
+Esta medición no alcanza para elegir el siguiente paso, pero sí señala uno. El patrón —
+la fusión ayuda en acierto@1 donde el léxico es débil, y perjudica en acierto@5 donde el
+léxico ya es fuerte — es la firma típica de un ranker ruidoso (vectorial, 0% de acierto@1
+por sí solo) diluyendo a uno bueno dentro de una fusión a peso igual: hoy `fuse()` en
+`retrieval.py` reparte 50/50 entre vectorial y léxico, sin ponderar ninguno de los dos.
+Subirle el peso a la mitad léxica en la fusión (y revisar `CANDIDATES_PER_RANKER` de paso)
+es una hipótesis más barata que meter un reranker con cross-encoder, y esta misma medición
+apunta hacia ahí. No decide si funcionará: falta correrla y medirla antes de comprometerse
+a una fase de reranking.
 
 Reproducir: `docker compose exec backend python -m app.services.evaluate eval/uswap.json <modo>`
 
