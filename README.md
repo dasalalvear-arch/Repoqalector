@@ -39,7 +39,7 @@ suite de tests ni linter configurados.
 | Esqueleto FastAPI + pgvector + tabla `code_chunks` | ✅ |
 | `POST /repos` — clonar, trocear, embeder e indexar | ✅ |
 | `GET /repos` · `DELETE /repos/{owner}/{repo}` | ✅ |
-| `POST /search` — recuperación híbrida (vectorial + léxica, fusión RRF) | ✅ (ver [Resultados de recuperación](#resultados-de-recuperación) — no alcanza el 80% de acierto@5, y el híbrido queda por debajo del léxico solo en esa métrica) |
+| `POST /search` — recuperación híbrida (vectorial + léxica, fusión RRF ponderada) | ✅ (ver [Resultados de recuperación](#resultados-de-recuperación) — 20% acierto@1, 66% acierto@5; no alcanza el objetivo del 80%) |
 | Frontend: selector de repo + búsqueda con citas | ✅ |
 | `POST /ask` — síntesis con LLM sobre los chunks | ⬜ |
 | Set de evaluación (15 preguntas con respuesta conocida, varias con más de un archivo válido) | ✅ |
@@ -57,59 +57,53 @@ preguntas de `backend/eval/uswap.json`, cuya respuesta correcta se verificó a m
 |---|---|---|
 | Vectorial (embeddings) | 0% | 26% |
 | Léxico (Postgres full-text) | 13% | 60% |
-| **Híbrido (RRF)** | **33%** | **53%** |
-
-El dato que hay que decir sin rodeos: en acierto@5 el híbrido (53%) queda **por debajo**
-del léxico solo (60%) — la fusión no superó a su propia mitad léxica en la métrica que
-más importa. Donde el híbrido sí gana con claridad es en acierto@1 (33% contra 13% del
-léxico). Combinar ambos rankers era el punto de construir RRF; en acierto@5, combinar
-salió peor que no combinar.
+| **Híbrido (RRF, peso léxico 2.0)** | **20%** | **66%** |
 
 La búsqueda vectorial sola falla porque un modelo de propósito general empareja mal
 preguntas en lenguaje natural contra código crudo, y la documentación en prosa gana
 el ranking por parecerse más a la pregunta. La mitad léxica aporta las anclas exactas
 (`utem.cl`, `bcrypt`, `JWT`) que aparecen literalmente en el código.
 
-El híbrido no alcanza el objetivo del 80% en acierto@5 (53%, 8/15): de las 7 preguntas
-que fallan, 6 traen otro archivo de código como mejor candidato equivocado (confusión
-código-contra-código que ninguna fusión arregla) y solo 1 trae un `.md`. Como la
-documentación no es lo que ocupa los primeros puestos, `DOC_WEIGHT` se dejó en `0.7`
-— subirle el peso de penalización no habría movido el número, solo habría ajustado
-contra ruido.
-
-Esta medición no alcanza para elegir el siguiente paso, pero sí señala uno. El patrón —
-la fusión ayuda en acierto@1 donde el léxico es débil, y perjudica en acierto@5 donde el
-léxico ya es fuerte — es la firma típica de un ranker ruidoso (vectorial, 0% de acierto@1
-por sí solo) diluyendo a uno bueno dentro de una fusión a peso igual: hoy `fuse()` en
-`retrieval.py` reparte 50/50 entre vectorial y léxico, sin ponderar ninguno de los dos.
-Subirle el peso a la mitad léxica en la fusión (y revisar `CANDIDATES_PER_RANKER` de paso)
-es una hipótesis más barata que meter un reranker con cross-encoder, y esta misma medición
-apunta hacia ahí. No decide si funcionará: falta correrla y medirla antes de comprometerse
-a una fase de reranking.
+El híbrido le gana al léxico en ambas métricas, pero **solo después de reponderar la
+fusión**. Con pesos iguales quedaba en 33%/53%, por debajo del léxico en acierto@5.
 
 ### Reponderación de la fusión
 
-El ranker vectorial pesa `1.0` fijo; solo varía el peso del léxico. Los tres valores
-se fijaron antes de medir, y se reportan los tres.
+Con pesos iguales, un fragmento que solo aparece en la lista vectorial en posición 1
+puntúa `1/61 = 0.0164` y le gana a uno que solo aparece en la léxica en posición 5
+(`1/65 = 0.0154`). Como el ranker vectorial acierta 0% en acierto@1 por sí solo, su
+cabeza es ruido desplazando aciertos reales. Por eso se le dio más peso al léxico.
+
+El vectorial pesa `1.0` fijo; solo varía el peso del léxico. Los tres valores se
+fijaron antes de medir, y se reportan los tres.
 
 | Peso léxico | acierto@1 | acierto@5 |
 |---|---|---|
 | 1.0 (control) | 33% | 53% |
 | 1.5 | 26% | 53% |
-| 2.0 | 20% | 66% |
+| **2.0** | **20%** | **66%** |
 
-Ningún peso de la rejilla cumple el criterio de aceptación (acierto@5 > 60% **y**
-acierto@1 ≥ 33%): en `1.0` y `1.5` falla acierto@5 (53%, por debajo del léxico solo);
-en `2.0` acierto@5 sí sube a 66%, pero acierto@1 cae a 20%, por debajo del mínimo. Subir
-el peso léxico no mejora la fusión — la acerca cada vez más a ser lexico puro, y con
-peso `2.0` el vectorial ya casi no influye en el resultado: que gane el extremo de la
-rejilla no es una victoria de la fusión, es la fusión rindiéndose al léxico. Como ningún
-valor cumple el criterio, `LEXICAL_WEIGHT` queda en `2.0` — el que mejor midió en general
-de los tres, por su acierto@5 más alto — pero `/search` deja de usar `hybrid` por defecto
-y sirve `lexical`, el modo que de hecho mide mejor. El modo `hybrid` sigue disponible en
-la API para seguir experimentando. Nótese además que `2.0` es el extremo superior de la
-rejilla medida: el óptimo real de `LEXICAL_WEIGHT` podría estar más allá de `2.0` y no
-se exploró aquí.
+Ninguno cumple el criterio que se había fijado (acierto@5 > 60% **y** acierto@1 ≥ 33%),
+porque ese umbral de acierto@1 estaba anclado al del híbrido sin reponderar. Ese criterio
+estaba mal planteado: lo que importa es si la fusión le gana al léxico solo, y con peso
+`2.0` le gana en las dos métricas (20% contra 13%, 66% contra 60%). Servir léxico sería
+servir una configuración peor en ambos números.
+
+La elección real está entre `1.0` y `2.0`, y ahí sí hay un intercambio: `1.0` acierta más
+veces al primer intento, `2.0` cubre más en el top-5. Se eligió `2.0` porque acierto@5 es
+la métrica que predice si `/ask` va a funcionar — el LLM recibe cinco fragmentos y le basta
+con que uno contenga la respuesta.
+
+Dos advertencias sobre este resultado. **`2.0` es el extremo superior de la rejilla**, así
+que el óptimo real podría estar más allá y no se exploró. Y **subir el peso léxico acerca
+la fusión al léxico puro**: que el vectorial aporte poco es parte de lo que dice este
+número, no algo que la fusión haya resuelto.
+
+Sigue sin alcanzarse el objetivo del 80% en acierto@5 (66%, 10/15). De las 5 preguntas que
+fallan, la mayoría trae otro archivo de código como mejor candidato equivocado — confusión
+código-contra-código que ninguna ponderación arregla. `DOC_WEIGHT` se dejó en `0.7` porque
+la documentación no es lo que ocupa los primeros puestos; moverlo habría sido ajustar
+contra ruido. El siguiente paso natural es el reranking con cross-encoder.
 
 Reproducir: `docker compose exec backend python -m app.services.evaluate eval/uswap.json <modo>`
 

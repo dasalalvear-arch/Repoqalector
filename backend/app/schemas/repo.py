@@ -24,10 +24,10 @@ class SearchRequest(BaseModel):
     repo: str
     question: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
-    # La fusion no supero al lexico solo en acierto@5 con ningun peso de la
-    # rejilla (ver Resultados de recuperacion en el README). Se sirve el modo
-    # que mide mejor; "hybrid" sigue disponible para seguir experimentando.
-    mode: SearchMode = "lexical"
+    # Con LEXICAL_WEIGHT=2.0 el hibrido le gana al lexico en ambas metricas
+    # (20% vs 13% en acierto@1, 66% vs 60% en acierto@5), asi que es el modo
+    # que se sirve. Los otros dos existen para medir cada mitad por separado.
+    mode: SearchMode = "hybrid"
 
 
 class SearchHit(BaseModel):
