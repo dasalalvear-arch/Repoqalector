@@ -24,7 +24,8 @@ al modelo sin la respuesta en el contexto.**
    repositorio, y se muestran igual los fragmentos por si sirven. Una respuesta inventada con una
    cita bien formateada es peor que ninguna respuesta.
 2. **Las citas se producen por índice, no por texto libre.** Ver más abajo.
-3. **La evaluación es automática y sin juez:** abstención correcta más integridad de citas.
+3. **La evaluación combina tres métricas mecánicas con un juez de fundamentación.** Las mecánicas son
+   deterministas y verificables; el juez cubre lo único que ellas no pueden ver.
 
 ## Diseño
 
@@ -97,6 +98,7 @@ key; se confirma contra Google AI Studio al implementar en vez de fijar uno de m
 
 La key llega por `GEMINI_API_KEY`, inyectada desde un `.env` en la raíz que git ignora. **Nunca en
 `backend/.env.example`**, que sí está versionado y es lo que `docker-compose.yml` lee vía `env_file`.
+La misma regla vale para `JUDGE_API_KEY`.
 
 ## Manejo de errores
 
@@ -130,10 +132,51 @@ prompt en la dirección equivocada.
 La tercera **debería ser cero**. Si no lo es, hay un bug de prompt o de parseo, no una cuestión de
 calidad del modelo.
 
-**Limitación declarada:** esto no mide si la respuesta es correcta en contenido. Mide si el modelo se
-comporta como debe dado lo que recibió. Una respuesta que cita el archivo correcto y describe mal el
-código pasaría las tres métricas. Medir corrección exige ojos humanos o un LLM juez, y se decidió no
-introducir un juez para no agregar una variable de calidad que no controlamos.
+### Juez de fundamentación
+
+Las tres métricas anteriores no pueden ver si la respuesta dice algo que los fragmentos no respaldan.
+Ese es exactamente el hueco que dejan las citas por índice: garantizan que el fragmento fue recibido,
+no que sostenga la afirmación.
+
+Un cuarto instrumento lo cubre. Al juez se le entregan la respuesta y los fragmentos que el modelo
+recibió, y se le pide que determine **si cada afirmación se sostiene en esos fragmentos** — no si es
+cierta en el mundo. Se le exige señalar qué fragmento respalda cada afirmación, para que trabaje en
+vez de opinar.
+
+| Métrica | Qué mide |
+|---|---|
+| Respuestas fundamentadas | De las que respondieron, ¿en cuántas toda afirmación se sostiene en los fragmentos citados? |
+
+**No necesita respuestas de referencia escritas a mano:** los fragmentos son el patrón de
+comparación. Se descartó el juez de corrección con referencias porque exige escribir a mano la
+respuesta correcta de cada pregunta; es más confiable, y se puede agregar después al mismo arnés
+sumando un campo al JSON, sin rehacer nada. Se descartó preguntarle al juez "¿es buena esta
+respuesta?" sin patrón de comparación: sin referencia, un juez califica fluidez tanto como exactitud.
+
+**El juez es un proveedor aparte, configurable:**
+
+```
+JUDGE_API_KEY     # key del proveedor
+JUDGE_BASE_URL    # endpoint compatible con el formato de OpenAI
+JUDGE_MODEL       # identificador del modelo
+```
+
+Groq, Together y OpenRouter exponen endpoints compatibles con ese formato, así que un solo cliente
+cubre a todos y cambiar de proveedor es cambiar tres variables. No se construye una capa de
+abstracción con una sola implementación: es un cliente HTTP con URL base configurable.
+
+**Sesgo declarado:** que Gemini juzgue respuestas de Gemini tiene sesgo — un modelo tiende a ser
+indulgente con su propia familia. Se mitiga exigiéndole que cite el fragmento de respaldo, pero no
+desaparece. Si el juez termina siendo el mismo proveedor que responde, **el número debe reportarse
+con el sesgo escrito al lado**, nunca como si fuera neutral.
+
+**El juez nunca reemplaza a las tres métricas mecánicas.** Aquellas son deterministas y auditables;
+el juez es una variable de calidad que no controlamos, y si se equivoca, la métrica se equivoca sin
+avisar. Va encima, no en lugar de.
+
+**Limitación que persiste:** ni el juez mide corrección factual. Una respuesta fundamentada en los
+fragmentos puede aun así interpretar mal el código. Para eso hacen falta ojos, o el juez con
+referencias que quedó fuera de alcance.
 
 ## Frontend
 
@@ -165,6 +208,14 @@ Siguiendo la convención del repo (sin framework de tests, `_self_check()` con `
 - Historial de conversación. Cada pregunta es independiente; el frontend ya acumula turnos para
   mostrarlos, pero no se envían como contexto.
 - Streaming de la respuesta.
-- LLM como juez de corrección.
+- Juez de **corrección** con respuestas de referencia escritas a mano. Es más confiable que el juez
+  de fundamentación pero cuesta escribir 15 respuestas leyendo el repo. Se puede agregar después
+  sumando un campo al JSON del set, sin rehacer el arnés.
 - Reranking con cross-encoder para cerrar la brecha de 66% a 80% en acierto@5. Sigue pendiente y es
   independiente de este trabajo.
+
+## Si el juez no está configurado
+
+`evaluate_ask.py` corre igual y reporta las tres métricas mecánicas, saltando la de fundamentación
+con un aviso. Conseguir la key del juez es una mejora, no un requisito para medir: bloquear la
+evaluación entera por una credencial opcional convertiría una mejora en un obstáculo.
