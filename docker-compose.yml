@@ -21,6 +21,11 @@ services:
     build: ./backend
     env_file:
       - ./backend/.env.example
+    environment:
+      # La key real vive en `.env` en la raiz (ignorado por git), nunca aqui ni
+      # en backend/.env.example, que si estan versionados. Compose lee ese .env
+      # solo y sustituye el valor al levantar.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
