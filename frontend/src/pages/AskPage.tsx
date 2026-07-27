@@ -92,7 +92,7 @@ export function AskPage() {
                         <span className="source-chip">
                           {hit.file_path}:{hit.line_start}-{hit.line_end}
                         </span>
-                        <span className="muted">dist {hit.distance}</span>
+                        <span className="muted">score {hit.score}</span>
                       </div>
                       <pre className="hit-code">{hit.content}</pre>
                     </div>

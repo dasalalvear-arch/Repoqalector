@@ -5,13 +5,13 @@ export type RepoSummary = {
   chunks: number;
 };
 
-/** Un fragmento recuperado. `distance`: 0 = identico, 2 = opuesto. */
+/** Un fragmento recuperado. `score`: mayor es mejor, en los tres modos. */
 export type SearchHit = {
   file_path: string;
   line_start: number;
   line_end: number;
   content: string;
-  distance: number;
+  score: number;
 };
 
 /** Una entrada del historial. `hits` solo viene en las del asistente. */
