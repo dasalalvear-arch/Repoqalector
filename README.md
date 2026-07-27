@@ -87,6 +87,30 @@ es una hipótesis más barata que meter un reranker con cross-encoder, y esta mi
 apunta hacia ahí. No decide si funcionará: falta correrla y medirla antes de comprometerse
 a una fase de reranking.
 
+### Reponderación de la fusión
+
+El ranker vectorial pesa `1.0` fijo; solo varía el peso del léxico. Los tres valores
+se fijaron antes de medir, y se reportan los tres.
+
+| Peso léxico | acierto@1 | acierto@5 |
+|---|---|---|
+| 1.0 (control) | 33% | 53% |
+| 1.5 | 26% | 53% |
+| 2.0 | 20% | 66% |
+
+Ningún peso de la rejilla cumple el criterio de aceptación (acierto@5 > 60% **y**
+acierto@1 ≥ 33%): en `1.0` y `1.5` falla acierto@5 (53%, por debajo del léxico solo);
+en `2.0` acierto@5 sí sube a 66%, pero acierto@1 cae a 20%, por debajo del mínimo. Subir
+el peso léxico no mejora la fusión — la acerca cada vez más a ser lexico puro, y con
+peso `2.0` el vectorial ya casi no influye en el resultado: que gane el extremo de la
+rejilla no es una victoria de la fusión, es la fusión rindiéndose al léxico. Como ningún
+valor cumple el criterio, `LEXICAL_WEIGHT` queda en `2.0` — el que mejor midió en general
+de los tres, por su acierto@5 más alto — pero `/search` deja de usar `hybrid` por defecto
+y sirve `lexical`, el modo que de hecho mide mejor. El modo `hybrid` sigue disponible en
+la API para seguir experimentando. Nótese además que `2.0` es el extremo superior de la
+rejilla medida: el óptimo real de `LEXICAL_WEIGHT` podría estar más allá de `2.0` y no
+se exploró aquí.
+
 Reproducir: `docker compose exec backend python -m app.services.evaluate eval/uswap.json <modo>`
 
 ## Uso

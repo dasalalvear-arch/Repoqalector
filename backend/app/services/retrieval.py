@@ -18,7 +18,7 @@ DOC_WEIGHT = 0.7
 # repoqa: constante fija, no configurable. Se calibra editandola y corriendo
 # la evaluacion. Si algun dia hay que calibrar por repositorio, ahi se
 # justifica moverla a configuracion.
-LEXICAL_WEIGHT = 1.0
+LEXICAL_WEIGHT = 2.0
 DOC_EXTENSIONS = (".md", ".rst")
 
 
