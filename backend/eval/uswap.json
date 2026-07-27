@@ -16,6 +16,6 @@
     { "question": "donde se configura la conexion a la base de datos", "expect": ["core/database.py", "core/config.py"] },
     { "question": "como sabe el frontend que el token expiro", "expect": ["services/api.ts", "hooks/useAuth.ts"] },
     { "question": "donde se decide si un usuario es admin", "expect": ["api/dependencies.py", "routes/admin.py"] },
-    { "question": "que cabeceras de seguridad devuelve la api", "expect": ["app/main.py", "vite.config.ts"] }
+    { "question": "que cabeceras de seguridad devuelve la api", "expect": ["app/main.py"] }
   ]
 }

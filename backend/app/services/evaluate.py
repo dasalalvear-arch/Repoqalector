@@ -24,6 +24,12 @@ from app.services import retrieval
 
 TOP_K = 5
 
+# `retrieval.search()` solo reconoce estos tres valores; cualquier otra cosa
+# (p.ej. un typo como "hibrid") cae en el fallback silencioso a hybrid dentro
+# de esa funcion, midiendo hybrid pero imprimiendo el nombre equivocado. Sin
+# esta validacion la medicion quedaria mal etiquetada sin ningun error.
+VALID_MODES = ("vector", "lexical", "hybrid")
+
 
 def load_set(path: Path) -> tuple[str, list[tuple[str, list[str]]]]:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -32,6 +38,9 @@ def load_set(path: Path) -> tuple[str, list[tuple[str, list[str]]]]:
 
 
 def evaluate(eval_path: Path, mode: str = "hybrid") -> float:
+    if mode not in VALID_MODES:
+        sys.exit(f"Modo invalido: {mode!r}. Usa uno de: {', '.join(VALID_MODES)}.")
+
     repo, questions = load_set(eval_path)
 
     db = SessionLocal()
