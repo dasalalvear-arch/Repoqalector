@@ -1,21 +1,21 @@
 {
   "repo": "dasalalvear-arch/u-swap",
-  "note": "Preguntas en espanol (el idioma de la interfaz) con la respuesta verificada a mano leyendo el repo. `expect` es un fragmento de la ruta donde esta la respuesta.",
+  "note": "Preguntas en espanol (el idioma de la interfaz) con la respuesta verificada a mano leyendo el repo. `expect` lista todas las rutas que cuentan como respuesta correcta: varias preguntas tienen mas de un origen legitimo.",
   "questions": [
-    { "question": "donde se valida que el correo sea @utem.cl", "expect": "routes/auth.py" },
-    { "question": "que algoritmo se usa para hashear las contrasenas", "expect": "core/security.py" },
-    { "question": "como se genera el token JWT de acceso", "expect": "core/security.py" },
-    { "question": "donde se define la tabla de usuarios", "expect": "models/user.py" },
-    { "question": "como se crea el usuario administrador al arrancar", "expect": "services/seed.py" },
-    { "question": "que endpoint devuelve las metricas del panel de admin", "expect": "routes/admin.py" },
-    { "question": "como se filtra el catalogo por categoria", "expect": "routes/items.py" },
-    { "question": "donde se guardan las imagenes de una publicacion", "expect": "models/item.py" },
-    { "question": "como se envia un mensaje en el chat", "expect": "routes/chat.py" },
-    { "question": "que estados puede tener una solicitud de intercambio", "expect": "models/match.py" },
-    { "question": "como se limita la cantidad de intentos de login", "expect": "core/limiter.py" },
-    { "question": "donde se configura la conexion a la base de datos", "expect": "core/database.py" },
-    { "question": "como sabe el frontend que el token expiro", "expect": "services/api.ts" },
-    { "question": "donde se decide si un usuario es admin", "expect": "api/dependencies.py" },
-    { "question": "que cabeceras de seguridad devuelve la api", "expect": "app/main.py" }
+    { "question": "donde se valida que el correo sea @utem.cl", "expect": ["routes/auth.py"] },
+    { "question": "que algoritmo se usa para hashear las contrasenas", "expect": ["core/security.py"] },
+    { "question": "como se genera el token JWT de acceso", "expect": ["core/security.py"] },
+    { "question": "donde se define la tabla de usuarios", "expect": ["models/user.py"] },
+    { "question": "como se crea el usuario administrador al arrancar", "expect": ["services/seed.py", "core/config.py"] },
+    { "question": "que endpoint devuelve las metricas del panel de admin", "expect": ["routes/admin.py"] },
+    { "question": "como se filtra el catalogo por categoria", "expect": ["routes/items.py", "pages/CatalogPage.tsx"] },
+    { "question": "donde se guardan las imagenes de una publicacion", "expect": ["models/item.py", "schemas/item.py"] },
+    { "question": "como se envia un mensaje en el chat", "expect": ["routes/chat.py", "pages/MatchesPage.tsx"] },
+    { "question": "que estados puede tener una solicitud de intercambio", "expect": ["models/match.py", "schemas/match.py"] },
+    { "question": "como se limita la cantidad de intentos de login", "expect": ["core/limiter.py", "routes/auth.py"] },
+    { "question": "donde se configura la conexion a la base de datos", "expect": ["core/database.py", "core/config.py"] },
+    { "question": "como sabe el frontend que el token expiro", "expect": ["services/api.ts", "hooks/useAuth.ts"] },
+    { "question": "donde se decide si un usuario es admin", "expect": ["api/dependencies.py", "routes/admin.py"] },
+    { "question": "que cabeceras de seguridad devuelve la api", "expect": ["app/main.py", "vite.config.ts"] }
   ]
 }
