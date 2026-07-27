@@ -1,5 +1,5 @@
 {
-  "name": "uswap-frontend",
+  "name": "repoqa-frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,17 +9,16 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "axios": "latest",
-    "lucide-react": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "react-router-dom": "latest",
-    "typescript": "latest"
+    "@vitejs/plugin-react": "4.3.4",
+    "axios": "1.7.9",
+    "lucide-react": "0.469.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "5.7.2",
+    "vite": "6.0.7"
   },
   "devDependencies": {
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5"
   }
 }

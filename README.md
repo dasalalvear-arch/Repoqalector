@@ -1,93 +1,65 @@
-# U-Swap
+# RepoQA
 
-Marketplace circular universitario para estudiantes UTEM. Registro con correo
-`@utem.cl`, catálogo con buscador y filtros, publicaciones, solicitudes de
-intercambio con chat por solicitud, panel de **Mis publicaciones** y **panel de
-administración** con moderación de publicaciones y KPIs. **No hay pagos**: el
-objetivo es reutilizar recursos dentro del campus mediante entregas presenciales.
+Asistente de preguntas y respuestas sobre un repositorio de código. Indexas un repo, preguntas en
+lenguaje natural, y la respuesta viene **citando el archivo y el rango de líneas** de donde salió —
+para que puedas verificarla en vez de confiar en ella.
 
-> Resumen completo (arquitectura, modelo de datos, seguridad y limitaciones
-> conocidas): ver [RESUMEN.md](RESUMEN.md).
+> `RepoQA` es un nombre provisorio.
 
 ## Stack
 
-- Frontend: React, Vite, TypeScript, React Router, Axios, lucide-react, PWA
-- Backend: FastAPI, SQLAlchemy, Pydantic, JWT (python-jose), bcrypt (passlib), slowapi
-- Base de datos: PostgreSQL
-- Infraestructura local: Docker Compose
+- **Backend:** FastAPI, SQLAlchemy, PostgreSQL + [pgvector](https://github.com/pgvector/pgvector)
+- **Frontend:** React + TypeScript + Vite
+- **Infra local:** Docker Compose
 
-## Roles
-
-- **STUDENT:** registro público (solo `@utem.cl`); publica, solicita, chatea y
-  gestiona sus propias publicaciones.
-- **ADMIN:** se siembra desde el entorno (`ADMIN_EMAIL` / `ADMIN_PASSWORD`), nunca
-  desde la API; accede al panel de administración.
-
-## Arranque con Docker
+## Arranque
 
 ```bash
 docker compose up --build
 ```
 
-Luego abre:
-
 - Frontend: http://localhost:5173
-- Backend: http://localhost:8000
 - API docs: http://localhost:8000/docs
 
-(añade `-v` a `docker compose down` para borrar también la base de datos)
+Para borrar también la base de datos: `docker compose down -v`.
 
-## Arranque manual
-
-Backend:
+Manual, sin Docker:
 
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload
+cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt && copy .env.example .env && uvicorn app.main:app --reload
 ```
 
-Frontend:
+`npm run build` (`tsc -b && vite build`) es la única verificación automatizada del proyecto — no hay
+suite de tests ni linter configurados.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## Estado
 
-`npm run build` (`tsc -b && vite build`) es la única verificación automatizada del
-proyecto (no hay suite de tests ni linter configurados).
+| Pieza | Estado |
+|---|---|
+| Esqueleto FastAPI + pgvector + tabla `code_chunks` | ✅ |
+| Frontend de preguntas con citas | ✅ UI lista, esperando el backend |
+| `POST /repos` — clonar, trocear e indexar | ⬜ |
+| `GET /repos` — repos indexados | ⬜ |
+| `POST /ask` — búsqueda semántica + LLM | ⬜ |
+| Set de evaluación | ⬜ |
 
-## Datos de prueba
+## Modelo de datos
 
-Script idempotente que crea 2 estudiantes y 7 publicaciones:
+Una sola tabla, `code_chunks`:
 
-```bash
-docker compose exec backend python -m app.services.seed_demo
-```
+| Columna | Para qué |
+|---|---|
+| `repo` | agrupa y filtra por repositorio |
+| `file_path`, `line_start`, `line_end` | la cita que se le muestra al usuario |
+| `content` | el texto del fragmento; va al prompt como contexto |
+| `embedding` | `vector(384)`, la búsqueda por similitud |
 
-- Estudiantes demo: `valentina.rojas@utem.cl` y `matias.fuentes@utem.cl` — contraseña `demo1234`.
-- Admin por defecto (desde `.env.example`): `admin@utem.cl` / `cambia-esta-clave-admin`.
-
-## Módulos y endpoints
-
-- **Auth:** `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
-- **Usuarios:** `GET /users/{id}`, `PUT /users/{id}`
-- **Publicaciones:** `GET /items` (filtros `search`, `category_id`, `owner_id`), `POST /items`, `GET /items/{id}`, `PUT /items/{id}`, `DELETE /items/{id}`
-- **Categorías:** `GET /categories`
-- **Solicitudes:** `POST /matches`, `GET /matches`, `PUT /matches/{id}`
-- **Chat:** `GET /chat/{matchId}`, `POST /chat/{matchId}`
-- **Admin:** `GET /admin/metrics`, `GET /admin/users`, `DELETE /admin/users/{id}`, `GET /admin/items`, `PUT /admin/items/{id}/approve`, `PUT /admin/items/{id}/hide`, `DELETE /admin/items/{id}`
-
-> La interfaz muestra "Solicitudes", pero el prefijo de la API sigue siendo `/matches`.
+No hay tabla `repos`: `SELECT DISTINCT repo` alcanza mientras el selector sea una lista.
 
 ## Decisiones
 
-- No hay pagos ni transacciones monetarias.
-- Solo se aceptan cuentas con correo institucional `@utem.cl`; el registro siempre crea rol `STUDENT`.
-- Las imágenes se manejan como URLs (http/https) para mantener simple el MVP; el siguiente paso natural es moverlas a almacenamiento real.
-- Las categorías iniciales (`Tecnologia`, `Papeleria`, `Bibliografia`) se siembran automáticamente al arrancar.
-- Sin migraciones: los cambios de columnas se aplican de forma idempotente en `services/schema.py`.
+- **Sin autenticación** en el MVP: es una herramienta local de un solo usuario. Reintroducir login
+  cuesta poco (el patrón JWT del proyecto anterior es reutilizable) y no vale la pena antes de tiempo.
+- **Sin migraciones:** el proyecto arranca en limpio, `create_all` alcanza.
+- **384 dimensiones** porque el modelo de embeddings previsto es `all-MiniLM-L6-v2`. Cambiar de
+  modelo cambia ese número y obliga a reindexar todo.

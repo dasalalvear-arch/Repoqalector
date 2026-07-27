@@ -671,3 +671,22 @@ textarea {
   font-size: 0.72rem;
   font-weight: 700;
 }
+
+/* Citas: archivo y rango de lineas debajo de cada respuesta del asistente.
+   Son lo que hace verificable la respuesta, asi que van siempre visibles. */
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.source-chip {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(31, 111, 100, 0.12);
+  color: #1f6f64;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}

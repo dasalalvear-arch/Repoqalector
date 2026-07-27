@@ -4,127 +4,99 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-U-Swap: a circular-economy marketplace for UTEM university students. Students register with an
-`@utem.cl` email, publish items, request exchanges (matches), and chat per-match to coordinate
-in-person handoffs. No payments. Spanish-facing UI, English code (see Conventions).
+RepoQA (provisional name): a RAG assistant that answers natural-language questions about a code
+repository, **citing the file and line range** each answer came from. Index a repo, ask a question,
+get an answer you can verify. Spanish-facing UI, English identifiers, Spanish code comments.
 
-Monorepo: `backend/` (FastAPI) + `frontend/` (React/Vite). PostgreSQL via Docker Compose.
+Monorepo: `backend/` (FastAPI) + `frontend/` (React/Vite). PostgreSQL + pgvector via Docker Compose.
 
-`RESUMEN.md` (Spanish) is the long-form project doc — data model, security notes, known
-limitations. Read it when you need more depth than this file gives.
-
-There is **no file storage or upload endpoint**: item images are base64 `data:` URLs stored inline
-in `item_images.image_url` (TEXT). Big images therefore bloat JSON payloads and DB rows.
+This codebase is a **repurposed copy of U-Swap**, a student marketplace. The marketplace domain
+(auth, items, matches, chat, admin) has been deleted; what survives is the infrastructure shape —
+Docker setup, FastAPI layout, the Axios client, and the CSS. If you find a stray `uswap` reference,
+it is leftover, not intentional.
 
 ## Commands
 
-Run everything (from repo root):
 ```bash
 docker compose up --build      # db + backend:8000 + frontend:5173, API docs at :8000/docs
-docker compose down            # stop; add -v to also wipe the Postgres volume (fresh DB)
+docker compose down -v         # -v also wipes the Postgres volume (fresh DB)
 docker compose logs backend    # also: frontend, db
 ```
 
-Backend only:
+Frontend typecheck — **the only automated check in the repo**, run it before committing:
 ```bash
-cd backend
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env         # then set JWT_SECRET_KEY (>=32 chars) or the app won't start
-uvicorn app.main:app --reload
+cd frontend && npm run build   # tsc -b && vite build
 ```
 
-Frontend only:
-```bash
-cd frontend
-npm install
-npm run dev                    # Vite dev server, host 0.0.0.0
-npm run build                  # tsc -b && vite build — this is the de-facto "lint/typecheck" gate
-```
-
-Demo data (2 students + 7 items, idempotent; both students log in with `demo1234`):
-```bash
-docker compose exec backend python -m app.services.seed_demo
-```
-
-There is **no test suite and no linter configured**. `npm run build` (which runs `tsc -b`) is the
-only automated check; run it before committing frontend changes. Note `frontend/package.json` pins
-every dependency to `latest`, so a fresh `npm install` can pull breaking majors — a build that
-suddenly fails on untouched code is usually that, not your change.
+There is no test suite and no linter. When you add non-trivial backend logic (chunking, retrieval),
+leave one runnable check behind rather than building a test framework.
 
 ## Architecture
 
+### The RAG pipeline (what actually matters)
+
+```
+POST /repos  → clone → filter files → chunk → embed → INSERT code_chunks
+POST /ask    → embed question → pgvector <-> search → build prompt → LLM → {answer, sources}
+```
+
+**Current state:** the pipeline is not implemented yet. `backend/app/api/routes/` is empty and
+`main.py` mounts no routers — only `/health` exists. The data model and the frontend are ready and
+waiting for it. See the status table in `README.md` before assuming an endpoint exists.
+
+### Data model
+One table, `code_chunks` (`models/chunk.py`). `file_path` + `line_start`/`line_end` are not
+bookkeeping — they are the citation shown to the user, and the whole point of the product. An answer
+without a verifiable source is the failure mode this project exists to avoid.
+
+`EMBEDDING_DIM = 384` matches `all-MiniLM-L6-v2`. **Changing the embedding model changes this
+number and invalidates every stored vector** — old and new embeddings are not comparable, so a model
+switch means reindexing everything.
+
+There is no `repos` table: `SELECT DISTINCT repo` backs the frontend's repo selector.
+
 ### Backend (`backend/app/`)
-Standard FastAPI layered layout. Each domain (auth, users, items, categories, matches, chat, admin)
-has a parallel file across four folders:
-- `models/` — SQLAlchemy ORM (tables: users, categories, items, item_images, matches, messages)
-- `schemas/` — Pydantic request/response shapes
-- `api/routes/` — endpoints, mounted in `main.py` under their prefix
-- `services/` — startup logic: `seed.py` (admin + categories), `schema.py` (column patches),
-  `seed_demo.py` (manual-testing data, run by hand — not on startup)
+FastAPI layered layout, mostly empty scaffolding right now: `models/`, `schemas/`, `api/routes/`,
+`services/`. `core/` holds `config.py` (pydantic-settings, reads `.env`) and `database.py`
+(engine + `get_db` session dependency).
 
-`core/` holds cross-cutting infra: `config.py` (pydantic-settings, reads `.env`), `database.py`
-(engine + `get_db` session dependency), `security.py` (bcrypt + JWT helpers), `limiter.py` (slowapi).
+**Startup in `main.py`** runs at import time: `CREATE EXTENSION IF NOT EXISTS vector` must execute
+**before** `create_all()`, or the `CREATE TABLE` fails with `type "vector" does not exist`. The
+`from app.models import chunk` import exists solely to register the model with `Base` before
+`create_all` runs — do not "clean it up".
 
-**Startup sequence in `main.py`** runs at import time, before the app object exists:
-`Base.metadata.create_all()` creates missing tables, then `ensure_runtime_schema(engine)` patches in
-columns added after the fact (role, moderation_status, is_reported), then `create_admin()` +
-`ensure_default_categories()` seed data. There are **no migrations** — `create_all` never alters
-existing tables, so `services/schema.py::ensure_runtime_schema()` is the hand-rolled stand-in: add a
-new column to an existing table by extending that function (it's idempotent). A column that lives
-only in the model, with no `ensure_runtime_schema` entry, won't appear on an existing DB unless you
-drop the volume (`docker compose down -v`).
+There are **no migrations**. The project starts from a clean DB, so `create_all` suffices; if you
+change a column on an existing DB, `docker compose down -v` is the intended reset.
 
-**Known model/DB gaps:**
-- `items.is_reported` is created by `ensure_runtime_schema` but has **no `Mapped` column in
-  `models/item.py`**. Accessing it in Python requires raw SQL or adding the mapped column first.
-- Enum label case is inconsistent between the two schema paths. SQLAlchemy's `Enum()` persists the
-  Python member **name**, so `ItemModerationStatus` (`pending`/`approved`/`hidden`) creates a
-  lowercase-label Postgres type via `create_all`, while `schema.py` declares that same type with
-  uppercase labels and an `APPROVED` default. On a fresh DB `create_all` wins and the `DO` block
-  no-ops; on a legacy DB missing the column the uppercase path can produce a type whose labels the
-  ORM will never match. `UserRole` is safe (names and values both uppercase). If you add an enum
-  column, make member names match what `schema.py` writes.
+**No authentication.** Single-user local tool. `security.py`, `limiter.py`, and `dependencies.py`
+were deleted along with their dependencies (`python-jose`, `passlib`, `bcrypt`, `slowapi`). If auth
+comes back, U-Swap's JWT pattern is the reference — but don't add it speculatively.
 
-**Docker Compose** reads `env_file: ./backend/.env.example` for the backend service — not `backend/.env`.
-Changes to `backend/.env` have no effect in Docker; edit `.env.example` or add an `environment:`
-override in `docker-compose.yml` instead.
+**Docker Compose reads `env_file: ./backend/.env.example`** — not `backend/.env`. Editing
+`backend/.env` has no effect in Docker; edit `.env.example` or add an `environment:` override.
+Because `.env.example` is committed, **never put a real API key in it** — use an `environment:`
+override in `docker-compose.yml`, which is where LLM/embedding credentials should go when added.
 
-**Auth flow:** JWT bearer tokens, `sub` = user email. `api/dependencies.py` provides
-`get_current_user` (decodes token, loads user) and `get_current_admin` (403 unless `role == ADMIN`).
-Use these as route dependencies for protected/admin endpoints. Registration is hard-locked to
-`@utem.cl` (`auth.py::validate_utem_email`) and always assigns `UserRole.STUDENT`; admins only come
-from the `.env` seed (`ADMIN_EMAIL`/`ADMIN_PASSWORD`), never from the API. Login/register are rate
-limited via `@limiter.limit(...)`.
-
-The API serves JSON only — `SecurityHeadersMiddleware` in `main.py` sets a locked-down CSP and
-`X-Frame-Options: DENY`; don't expect to serve HTML from here.
+The db service must stay on `pgvector/pgvector:pg16`; the official `postgres` image lacks the
+extension and startup will fail.
 
 ### Frontend (`frontend/src/`)
-React Router SPA. All routing and role gating lives in `routes/App.tsx`. Pages: Auth, Catalog,
-Publish, Matches, MyPublications, Admin. `PublishPage` is dual-purpose — `/publish` creates,
-`/publish/:id` edits the same form. Catalog is the only public route; everything else redirects to
-`/auth`, and `/admin` bounces students back to `/`.
+Single page, no router — `routes/App.tsx` renders `AskPage` directly. React Router, the PWA
+(manifest + service worker), and the auth hooks were removed; don't reintroduce them for one screen.
 
-`services/api.ts` is the single source of truth: a configured Axios instance plus **all** shared TS
-types (User, Item, Match, etc. — mirror the backend Pydantic schemas, update both together). A
-request interceptor attaches the bearer token from `localStorage["uswap.token"]`; a response
-interceptor catches 401-with-active-session, clears the token, and fires a `uswap:unauthorized`
-window event. The Axios base URL is read from `VITE_API_URL` at build time (Docker Compose sets it
-to `http://localhost:8000`; override via `environment:` in compose or a `.env` file for other
-deployments).
+`services/api.ts` is the Axios instance plus the shared types (`Answer`, `Source`, `Turn`) that
+mirror the backend Pydantic schemas — update both together.
 
-`hooks/useAuth.ts` is the auth state machine: reads the token, calls `/auth/me` to hydrate the user,
-listens for `uswap:unauthorized` to force-logout, and `login()` returns the user's role so
-`routes/App.tsx` can redirect students vs. admins. Auth state lives in this hook (no global store).
+`pages/AskPage.tsx` is adapted from U-Swap's chat UI, which is why the CSS classes are named
+`matches-layout` / `match-row` / `message`. The `.sources` / `.source-chip` classes at the bottom of
+`styles.css` are the new part: they render the citations under each answer.
 
-### Contract coupling
-A change to any model usually ripples through three places — keep them in sync:
-`models/<x>.py` → `schemas/<x>.py` → the matching type in `frontend/src/services/api.ts`.
+Dependencies are **pinned** in `package.json` (U-Swap had them all on `latest`, which broke builds
+on untouched code). Keep them pinned.
 
 ## Conventions
-- Code, identifiers, and comments in English; user-visible strings may be Spanish.
-- **Local-only repo — no remote, and nothing gets pushed to GitHub.** This is a fresh working copy
-  being repurposed; the original U-Swap project (with its GitHub remote) lives separately under
-  `Escritorio/Proyectos Universidad/u-swap` and must not be touched from here. Do not add a remote.
-- Never commit `.env` (only `.env.example`). `JWT_SECRET_KEY` has no default and must be >=32 chars.
+- Identifiers in English; code comments and user-visible strings in Spanish.
+- **Local-only repo — no remote, nothing gets pushed to GitHub.** The original U-Swap project, with
+  its GitHub remote, lives separately under `Escritorio/Proyectos Universidad/u-swap` and must not
+  be touched from here. Do not add a remote.
+- Mark deliberate shortcuts with a `repoqa:` comment naming the ceiling and the upgrade path.

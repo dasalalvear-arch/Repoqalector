@@ -1,32 +1,20 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api.routes import auth, categories, chat, items, matches, users, admin
 from app.core.config import settings
-from app.core.database import Base, engine, SessionLocal
-from app.core.limiter import limiter
-from app.services.schema import ensure_runtime_schema
-from app.services.seed import create_admin, ensure_default_categories
+from app.core.database import Base, engine
+from app.models import chunk  # noqa: F401  — registra CodeChunk antes de create_all
+
+# pgvector: la extension tiene que existir antes de que create_all vea la
+# columna Vector, o el CREATE TABLE falla con "type vector does not exist".
+with engine.begin() as connection:
+    connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 Base.metadata.create_all(bind=engine)
-ensure_runtime_schema(engine)
-
-db = SessionLocal()
-try:
-    create_admin()
-    ensure_default_categories(db)
-finally:
-    db.close()
 
 app = FastAPI(title=settings.project_name, version="0.1.0")
-
-# Rate limiting global (slowapi). Las rutas sensibles se decoran con
-# @limiter.limit(...). Una peticion sobre el limite devuelve 429.
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -53,13 +41,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(users.router, prefix="/users", tags=["users"])
-app.include_router(items.router, prefix="/items", tags=["items"])
-app.include_router(categories.router, prefix="/categories", tags=["categories"])
-app.include_router(matches.router, prefix="/matches", tags=["matches"])
-app.include_router(chat.router, prefix="/chat", tags=["chat"])
-app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
