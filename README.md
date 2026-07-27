@@ -39,7 +39,7 @@ suite de tests ni linter configurados.
 | Esqueleto FastAPI + pgvector + tabla `code_chunks` | ✅ |
 | `POST /repos` — clonar, trocear, embeder e indexar | ✅ |
 | `GET /repos` · `DELETE /repos/{owner}/{repo}` | ✅ |
-| `POST /search` — recuperación pura, sin LLM | ✅ |
+| `POST /search` — recuperación híbrida (vectorial + léxica, fusión RRF) | ✅ |
 | Frontend: selector de repo + búsqueda con citas | ✅ |
 | `POST /ask` — síntesis con LLM sobre los chunks | ⬜ |
 | Set de evaluación (10-15 preguntas con respuesta conocida) | ⬜ |
@@ -47,6 +47,31 @@ suite de tests ni linter configurados.
 **Por qué `/search` antes que `/ask`:** si la recuperación trae los fragmentos equivocados, ningún
 LLM lo arregla — solo lo disfraza. Tener la búsqueda expuesta por separado permite medir la calidad
 de la recuperación sin que la generación la tape.
+
+## Resultados de recuperación
+
+Medido sobre `dasalalvear-arch/u-swap` (150 fragmentos, 57 archivos) con las 15
+preguntas de `backend/eval/uswap.json`, cuya respuesta correcta se verificó a mano.
+
+| Modo | acierto@1 | acierto@5 |
+|---|---|---|
+| Vectorial (embeddings) | 0% | 26% |
+| Léxico (Postgres full-text) | 13% | 60% |
+| **Híbrido (RRF)** | **33%** | **53%** |
+
+La búsqueda vectorial sola falla porque un modelo de propósito general empareja mal
+preguntas en lenguaje natural contra código crudo, y la documentación en prosa gana
+el ranking por parecerse más a la pregunta. La mitad léxica aporta las anclas exactas
+(`utem.cl`, `bcrypt`, `JWT`) que aparecen literalmente en el código.
+
+El híbrido no alcanza el objetivo del 80% en acierto@5 (53%, 8/15): de las 7 preguntas
+que fallan, 6 traen otro archivo de código como mejor candidato equivocado (confusión
+código-contra-código que ninguna fusión arregla) y solo 1 trae un `.md`. Como la
+documentación no es lo que ocupa los primeros puestos, `DOC_WEIGHT` se dejó en `0.7`
+— subirle el peso de penalización no habría movido el número, solo habría ajustado
+contra ruido.
+
+Reproducir: `docker compose exec backend python -m app.services.evaluate eval/uswap.json <modo>`
 
 ## Uso
 
