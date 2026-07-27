@@ -28,6 +28,11 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
+      # Sets de evaluacion: son datos, se editan sin rebuild.
+      - ./backend/eval:/app/eval
+      # Cache de los modelos de sentence-transformers: sin esto se re-descargan
+      # ~90MB cada vez que se recrea el contenedor.
+      - hf_models:/models
 
   frontend:
     image: node:22-alpine
@@ -44,3 +49,4 @@ services:
 
 volumes:
   postgres_data:
+  hf_models:

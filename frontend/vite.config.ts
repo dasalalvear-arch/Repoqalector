@@ -1,8 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 
-// Deriva el origen de la API (ej: https://api.uswap.cl) desde VITE_API_URL
-// para autorizarlo en connect-src sin abrir la politica a todo internet.
+// Deriva el origen de la API desde VITE_API_URL para autorizarlo en
+// connect-src sin abrir la politica a todo internet.
 function apiOrigin(apiUrl: string | undefined): string {
   if (!apiUrl) return "";
   try {
@@ -27,12 +27,11 @@ function cspPlugin(apiUrl: string | undefined): Plugin {
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "manifest-src 'self'",
     "worker-src 'self'",
   ].join("; ");
 
   return {
-    name: "uswap-csp",
+    name: "repoqa-csp",
     apply: "build",
     transformIndexHtml(html) {
       return {

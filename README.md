@@ -37,11 +37,39 @@ suite de tests ni linter configurados.
 | Pieza | Estado |
 |---|---|
 | Esqueleto FastAPI + pgvector + tabla `code_chunks` | ✅ |
-| Frontend de preguntas con citas | ✅ UI lista, esperando el backend |
-| `POST /repos` — clonar, trocear e indexar | ⬜ |
-| `GET /repos` — repos indexados | ⬜ |
-| `POST /ask` — búsqueda semántica + LLM | ⬜ |
-| Set de evaluación | ⬜ |
+| `POST /repos` — clonar, trocear, embeder e indexar | ✅ |
+| `GET /repos` · `DELETE /repos/{owner}/{repo}` | ✅ |
+| `POST /search` — recuperación pura, sin LLM | ✅ |
+| Frontend: selector de repo + búsqueda con citas | ✅ |
+| `POST /ask` — síntesis con LLM sobre los chunks | ⬜ |
+| Set de evaluación (10-15 preguntas con respuesta conocida) | ⬜ |
+
+**Por qué `/search` antes que `/ask`:** si la recuperación trae los fragmentos equivocados, ningún
+LLM lo arregla — solo lo disfraza. Tener la búsqueda expuesta por separado permite medir la calidad
+de la recuperación sin que la generación la tape.
+
+## Uso
+
+```bash
+curl -X POST http://localhost:8000/repos -H "Content-Type: application/json" -d "{\"url\":\"https://github.com/owner/repo\"}"
+```
+
+```bash
+curl -X POST http://localhost:8000/search -H "Content-Type: application/json" -d "{\"repo\":\"owner/repo\",\"question\":\"donde se valida el login\"}"
+```
+
+Reindexar el mismo repo reemplaza sus chunks. La primera búsqueda tras levantar el contenedor tarda
+unos segundos: es la descarga del modelo de embeddings (~90MB, queda cacheado en un volumen).
+
+## Verificaciones
+
+No hay suite de tests. Lo que sí hay:
+
+```bash
+cd frontend && npm run build                                  # tsc -b, el gate de tipos
+docker compose exec backend python -m app.services.chunker    # límites de las ventanas
+docker compose exec backend python -m app.services.ingest     # validación de URLs
+```
 
 ## Modelo de datos
 

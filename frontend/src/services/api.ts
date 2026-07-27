@@ -1,21 +1,24 @@
 import axios from "axios";
 
-export type Source = {
+export type RepoSummary = {
+  repo: string;
+  chunks: number;
+};
+
+/** Un fragmento recuperado. `distance`: 0 = identico, 2 = opuesto. */
+export type SearchHit = {
   file_path: string;
   line_start: number;
   line_end: number;
+  content: string;
+  distance: number;
 };
 
-export type Answer = {
-  answer: string;
-  sources: Source[];
-};
-
-/** Una entrada del historial. `sources` solo viene en las del asistente. */
+/** Una entrada del historial. `hits` solo viene en las del asistente. */
 export type Turn = {
   role: "user" | "assistant";
   content: string;
-  sources?: Source[];
+  hits?: SearchHit[];
 };
 
 export const api = axios.create({

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.api.routes import repos, search
 from app.core.config import settings
 from app.core.database import Base, engine
 from app.models import chunk  # noqa: F401  — registra CodeChunk antes de create_all
@@ -40,6 +41,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(repos.router, prefix="/repos", tags=["repos"])
+app.include_router(search.router, prefix="/search", tags=["search"])
 
 
 @app.get("/health")
