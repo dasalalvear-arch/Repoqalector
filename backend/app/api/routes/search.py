@@ -1,11 +1,9 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.chunk import CodeChunk
 from app.schemas.repo import SearchHit, SearchRequest
-from app.services.embeddings import embed_one
+from app.services import retrieval
 
 router = APIRouter()
 
@@ -18,24 +16,11 @@ def search(payload: SearchRequest, db: Session = Depends(get_db)) -> list[Search
     los chunks que salen de aqui no contienen la respuesta, ningun modelo la va
     a inventar bien. Es el paso previo a /ask.
     """
-    question_vector = embed_one(payload.question)
-
-    # Coseno porque all-MiniLM-L6-v2 produce vectores normalizados.
-    distance = CodeChunk.embedding.cosine_distance(question_vector)
-    rows = db.execute(
-        select(CodeChunk, distance.label("distance"))
-        .filter(CodeChunk.repo == payload.repo)
-        .order_by(distance)
-        .limit(payload.top_k)
-    ).all()
-
-    return [
-        SearchHit(
-            file_path=chunk.file_path,
-            line_start=chunk.line_start,
-            line_end=chunk.line_end,
-            content=chunk.content,
-            distance=round(float(dist), 4),
+    # Un repo mal escrito devolvia lista vacia, indistinguible de "no encontre
+    # nada". El 404 lo dice.
+    if not retrieval.repo_exists(db, payload.repo):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El repositorio '{payload.repo}' no esta indexado",
         )
-        for chunk, dist in rows
-    ]
+    return retrieval.search(db, payload.repo, payload.question, payload.top_k, payload.mode)

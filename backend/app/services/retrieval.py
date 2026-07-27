@@ -1,6 +1,13 @@
 """Recuperacion: busqueda vectorial, busqueda lexica y su fusion."""
 import re
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models.chunk import TEXT_SEARCH_CONFIG, CodeChunk
+from app.schemas.repo import SearchHit
+from app.services.embeddings import embed_one
+
 CANDIDATES_PER_RANKER = 30
 RRF_K = 60
 DOC_WEIGHT = 0.7
@@ -47,6 +54,82 @@ def fuse(ranked_ids: list[list[int]], paths: dict[int, str]) -> list[tuple[int, 
             scores[chunk_id] *= DOC_WEIGHT
 
     return sorted(scores.items(), key=lambda pair: -pair[1])
+
+
+def repo_exists(db: Session, repo: str) -> bool:
+    return db.query(CodeChunk.id).filter(CodeChunk.repo == repo).first() is not None
+
+
+def _vector_candidates(db: Session, repo: str, question: str) -> list[tuple[CodeChunk, float]]:
+    """Candidatos por similitud de embeddings. Devuelve (chunk, score) con mayor = mejor."""
+    distance = CodeChunk.embedding.cosine_distance(embed_one(question))
+    rows = db.execute(
+        select(CodeChunk, distance.label("distance"))
+        .filter(CodeChunk.repo == repo)
+        .order_by(distance)
+        .limit(CANDIDATES_PER_RANKER)
+    ).all()
+    return [(chunk, 1.0 - float(value)) for chunk, value in rows]
+
+
+def _lexical_candidates(db: Session, repo: str, question: str) -> list[tuple[CodeChunk, float]]:
+    """Candidatos por texto completo. Lista vacia si la pregunta no deja terminos."""
+    terms = build_tsquery(question)
+    if not terms:
+        return []
+
+    tsquery = func.to_tsquery(TEXT_SEARCH_CONFIG, terms)
+    rank = func.ts_rank_cd(CodeChunk.search_vector, tsquery)
+    rows = db.execute(
+        select(CodeChunk, rank.label("rank"))
+        .filter(CodeChunk.repo == repo, CodeChunk.search_vector.op("@@")(tsquery))
+        .order_by(rank.desc())
+        .limit(CANDIDATES_PER_RANKER)
+    ).all()
+    return [(chunk, float(value)) for chunk, value in rows]
+
+
+def _to_hits(scored: list[tuple[CodeChunk, float]], top_k: int) -> list[SearchHit]:
+    return [
+        SearchHit(
+            file_path=chunk.file_path,
+            line_start=chunk.line_start,
+            line_end=chunk.line_end,
+            content=chunk.content,
+            score=round(score, 4),
+        )
+        for chunk, score in scored[:top_k]
+    ]
+
+
+def search(
+    db: Session,
+    repo: str,
+    question: str,
+    top_k: int = 5,
+    mode: str = "hybrid",
+) -> list[SearchHit]:
+    """Busqueda semantica, lexica o fusionada sobre un repo indexado.
+
+    `mode` existe para poder medir cada mitad por separado en la evaluacion. La
+    ruta HTTP usa "hybrid"; los otros dos modos son instrumentos de medicion.
+    """
+    if mode == "vector":
+        return _to_hits(_vector_candidates(db, repo, question), top_k)
+    if mode == "lexical":
+        return _to_hits(_lexical_candidates(db, repo, question), top_k)
+
+    vector = _vector_candidates(db, repo, question)
+    lexical = _lexical_candidates(db, repo, question)
+
+    by_id = {chunk.id: chunk for chunk, _ in vector + lexical}
+    paths = {chunk_id: chunk.file_path for chunk_id, chunk in by_id.items()}
+    ranked_ids = [
+        [chunk.id for chunk, _ in vector],
+        [chunk.id for chunk, _ in lexical],
+    ]
+    fused = fuse(ranked_ids, paths)
+    return _to_hits([(by_id[chunk_id], score) for chunk_id, score in fused], top_k)
 
 
 def _self_check() -> None:

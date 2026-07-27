@@ -1,4 +1,8 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+SearchMode = Literal["vector", "lexical", "hybrid"]
 
 
 class IndexRepoRequest(BaseModel):
@@ -20,6 +24,7 @@ class SearchRequest(BaseModel):
     repo: str
     question: str = Field(min_length=1)
     top_k: int = Field(default=5, ge=1, le=20)
+    mode: SearchMode = "hybrid"
 
 
 class SearchHit(BaseModel):
@@ -27,6 +32,7 @@ class SearchHit(BaseModel):
     line_start: int
     line_end: int
     content: str
-    # 0 = identico, 2 = opuesto. Sirve para ver si la busqueda esta trayendo
-    # basura sin tener que leer los chunks uno por uno.
-    distance: float
+    # Mayor es mejor, en los tres modos. No es una distancia: el puntaje de RRF
+    # no tiene unidad, y en modo vectorial se reporta 1 - distancia_coseno para
+    # que la direccion sea la misma y las comparaciones no se inviertan.
+    score: float
