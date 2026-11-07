@@ -26,6 +26,7 @@ services:
       # en backend/.env.example, que si estan versionados. Compose lee ese .env
       # solo y sustituye el valor al levantar.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      JUDGE_API_KEY: ${JUDGE_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
