@@ -39,3 +39,18 @@ class SearchHit(BaseModel):
     # no tiene unidad, y en modo vectorial se reporta 1 - distancia_coseno para
     # que la direccion sea la misma y las comparaciones no se inviertan.
     score: float
+
+
+class AskRequest(BaseModel):
+    repo: str
+    question: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class AskResponse(BaseModel):
+    answer: str
+    found: bool  # False = se abstuvo
+    # Si found: solo los citados, en el orden en que aparecen en `answer`, y
+    # `[n]` en el texto es sources[n-1]. Si no: los recuperados, para que el
+    # usuario vea igual el codigo que se encontro.
+    sources: list[SearchHit]
