@@ -18,9 +18,11 @@ class Settings(BaseSettings):
     # pero /search y /repos siguen funcionando.
     gemini_api_key: str = ""
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
-    # 2.5-flash ya no se ofrece a keys nuevas (404); 3.8-flash daba 503 por
-    # demanda al implementar. Se cambia aqui o en .env.example.
-    gemini_model: str = "gemini-3.5-flash"
+    # flash-lite y no flash: el plan gratuito de 3.5-flash da 20 consultas por
+    # dia y una evaluacion completa son 15. Si la evaluacion muestra que lite no
+    # alcanza, se vuelve a flash con facturacion activada. Se cambia aqui o en
+    # .env.example.
+    gemini_model: str = "gemini-3.5-flash-lite"
 
     # Juez de fundamentacion: solo lo usa evaluate_ask.py. Cualquier proveedor
     # con endpoint compatible con OpenAI (Groq, Together, OpenRouter).

@@ -141,7 +141,8 @@ should work better" can be checked instead of believed.
 
 ## Conventions
 - Identifiers in English; code comments and user-visible strings in Spanish.
-- **Local-only repo — no remote, nothing gets pushed to GitHub.** The original U-Swap project, with
-  its GitHub remote, lives separately under `Escritorio/Proyectos Universidad/u-swap` and must not
-  be touched from here. Do not add a remote.
+- **Published at `github.com/dasalalvear-arch/Repoqalector`** (public; local branch
+  `feature/hybrid-retrieval` is pushed as `main`). The original U-Swap project, with its own GitHub
+  remote, lives separately under `Escritorio/Proyectos Universidad/u-swap` and must not be touched
+  from here. Never commit API keys: they live in the gitignored root `.env`.
 - Mark deliberate shortcuts with a `repoqa:` comment naming the ceiling and the upgrade path.

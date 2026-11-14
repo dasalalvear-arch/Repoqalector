@@ -39,5 +39,10 @@ def chat(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.load(response)
         return data["choices"][0]["message"]["content"] or ""
+    except urllib.error.HTTPError as error:
+        # El cuerpo dice que limite se toco o que modelo no existe; sin el, un
+        # 429 o un 404 no se pueden diagnosticar. Va al log, nunca al cliente.
+        detail = " ".join(error.read().decode(errors="replace").split())[:500]
+        raise LLMError(f"HTTP {error.code}: {detail}") from error
     except (urllib.error.URLError, TimeoutError, KeyError, IndexError, TypeError, ValueError) as error:
         raise LLMError(str(error)) from error

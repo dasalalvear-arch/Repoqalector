@@ -515,6 +515,8 @@ git commit -m "feat: POST /ask with 404/503/502 handling"
 
 ### Task 4: Mechanical evaluation
 
+> **Revised during execution (2026-11-07) — the steps below are superseded.** Gemini's free tier allows 20 requests/day per model and one run is 15. The original harness called the model and measured in the same pass, so a `429` mid-run threw away every answer already paid for; three attempts exhausted the daily quota without a single complete result. The implemented harness (`backend/app/services/evaluate_ask.py`) separates generating from measuring: each answer is saved to `eval/<set>.answers.json` as it arrives, an interrupted run resumes from where it stopped, saved answers are discarded automatically if the model or prompt changes, and the metrics are computed from that file by a pure `summarize()` covered by `--check`. **Task 5 consequence:** the judge reads `record["answer"]` and `record["sources"]` from the saved answers instead of calling `synthesis.ask()`, so judging spends only the judge provider's quota, never Gemini's.
+
 **Files:**
 - Create: `backend/app/services/evaluate_ask.py`
 

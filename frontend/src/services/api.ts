@@ -14,10 +14,18 @@ export type SearchHit = {
   score: number;
 };
 
-/** Una entrada del historial. `hits` solo viene en las del asistente. */
+/** Respuesta de /ask. Si `found`, `[n]` en `answer` es `sources[n-1]`; si no, `sources` son los recuperados. */
+export type AskResponse = {
+  answer: string;
+  found: boolean;
+  sources: SearchHit[];
+};
+
+/** Una entrada del historial. `hits` y `found` solo vienen en las del asistente. */
 export type Turn = {
   role: "user" | "assistant";
   content: string;
+  found?: boolean;
   hits?: SearchHit[];
 };
 

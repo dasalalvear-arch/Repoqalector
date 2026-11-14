@@ -1,7 +1,8 @@
+import { isAxiosError } from "axios";
 import { Send } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
-import { api, RepoSummary, SearchHit, Turn } from "../services/api";
+import { api, AskResponse, RepoSummary, Turn } from "../services/api";
 
 export function AskPage() {
   const [repos, setRepos] = useState<RepoSummary[]>([]);
@@ -30,27 +31,26 @@ export function AskPage() {
     setTurns((current) => [...current, { role: "user", content: question }]);
     setPending(true);
     try {
-      // Todavia no hay sintesis con LLM: se muestran los fragmentos crudos que
-      // trajo la busqueda, que es justo lo que hay que poder evaluar primero.
-      const response = await api.post<SearchHit[]>("/search", {
+      const response = await api.post<AskResponse>("/ask", {
         repo: activeRepo,
         question,
         top_k: 5,
       });
+      const { answer, found, sources } = response.data;
+      setTurns((current) => [
+        ...current,
+        { role: "assistant", content: answer, found, hits: sources },
+      ]);
+    } catch (error) {
+      // 503 (falta la key) y 502 (fallo el modelo) traen un detail legible.
+      const detail = isAxiosError(error) ? error.response?.data?.detail : undefined;
       setTurns((current) => [
         ...current,
         {
           role: "assistant",
-          content: response.data.length
-            ? "Fragmentos mas parecidos:"
-            : "No se encontro nada para esa pregunta.",
-          hits: response.data,
+          content:
+            typeof detail === "string" ? detail : "Fallo la consulta. Revisa que el backend este arriba.",
         },
-      ]);
-    } catch {
-      setTurns((current) => [
-        ...current,
-        { role: "assistant", content: "Fallo la busqueda. Revisa que el backend este arriba." },
       ]);
     } finally {
       setPending(false);
@@ -85,21 +85,24 @@ export function AskPage() {
             <div className="thread">
               {turns.map((turn, index) => (
                 <div key={index} className={turn.role === "user" ? "turn mine" : "turn"}>
-                  {turn.content}
-                  {turn.hits?.map((hit) => (
+                  <div style={{ whiteSpace: "pre-wrap" }}>{turn.content}</div>
+                  {turn.found === false && turn.hits?.length ? (
+                    <p className="muted">Fragmentos recuperados, por si sirven:</p>
+                  ) : null}
+                  {turn.hits?.map((hit, i) => (
                     <div key={`${hit.file_path}:${hit.line_start}`} className="hit">
                       <div className="sources">
                         <span className="source-chip">
+                          {turn.found ? `[${i + 1}] ` : ""}
                           {hit.file_path}:{hit.line_start}-{hit.line_end}
                         </span>
-                        <span className="muted">score {hit.score}</span>
                       </div>
                       <pre className="hit-code">{hit.content}</pre>
                     </div>
                   ))}
                 </div>
               ))}
-              {pending && <div className="turn muted">Buscando en el codigo...</div>}
+              {pending && <div className="turn muted">Leyendo el codigo...</div>}
             </div>
             <form className="ask-form" onSubmit={ask}>
               <input name="question" placeholder="Pregunta algo sobre este repositorio" />
