@@ -38,12 +38,13 @@ leave one runnable check behind rather than building a test framework.
 ```
 POST /repos   → clone → filter files → chunk → embed → INSERT code_chunks
 POST /search  → embed question → vector + lexical search → RRF fusion → chunks     [DONE]
-POST /ask     → /search → prompt with numbered chunks → LLM → {answer, sources}    [NOT BUILT]
+POST /ask     → /search → prompt with numbered chunks → LLM → {answer, sources}    [DONE]
 ```
 
-**Current state:** ingestion and retrieval work and are measured. `/ask` is designed and approved but
-not implemented — see `docs/superpowers/specs/2026-07-27-ask-endpoint-design.md`. The status table in
-`README.md` is the authority on what exists.
+**Current state:** ingestion, retrieval and `/ask` work and are measured (design:
+`docs/superpowers/specs/2026-07-27-ask-endpoint-design.md`). The next open item is cross-encoder
+reranking, to move hit@5 from 66% toward the 80% target. The status table in `README.md` is the
+authority on what exists.
 
 **Retrieval is hybrid, and the numbers matter more than the code here.** Vector search alone scored
 0% hit@1 / 26% hit@5 on the eval set; lexical alone 13% / 60%; the fused ranker with
@@ -62,6 +63,18 @@ The question set is data, not code: `backend/eval/uswap.json`, 15 questions whos
 verified by hand, several accepting more than one valid file. `evaluate.py` calls the real
 `retrieval.search()` rather than reimplementing ranking — a parallel implementation would drift and
 the measured number would stop being the one users experience.
+
+`/ask` has its own harness, which needs `GEMINI_API_KEY` (`evaluate` does not):
+
+```bash
+docker compose exec backend python -m app.services.evaluate_ask eval/uswap.json
+```
+
+It saves every answer and judge verdict to `backend/eval/uswap.answers.json` as it arrives and only
+generates what is missing — Gemini's free tier is ~20 requests/day and a run is 15, so a rerun must
+not pay twice. Saved answers are discarded automatically when the model or prompt changes; after a
+retrieval change, delete the file by hand. Last measured: answered when it should 9/10, abstained
+when it should 2/5, 1 invalid citation, 11/12 grounded per the judge.
 
 ### Data model
 One table, `code_chunks` (`models/chunk.py`). `file_path` + `line_start`/`line_end` are not
@@ -84,6 +97,13 @@ job beyond delegating is turning an unknown repo into a 404. Keep it that way, a
 `search()` accepts `mode` as a plain `str` and falls through to hybrid on an unrecognized value —
 callers that bypass the HTTP layer must validate it themselves, which `evaluate.py` does.
 
+`services/synthesis.py` owns the `/ask` prompt and citation parsing. The model only ever writes
+`[n]`; the mapping to file and lines happens in our code, so a fabricated path is impossible by
+construction. Citations are renumbered for display, so `[n]` in `answer` is `sources[n-1]`. When the
+model abstains (`found` false), `sources` carries the retrieved fragments instead. `services/llm.py`
+is a stdlib `urllib` client for any OpenAI-compatible chat endpoint — Gemini and the judge both go
+through it; no SDK, no new dependency.
+
 `code_chunks.search_vector` is a **generated** column (`Computed(..., persisted=True)`): Postgres
 maintains it, so ingestion never touches it and it cannot drift from `content`.
 
@@ -105,7 +125,7 @@ comes back, U-Swap's JWT pattern is the reference — but don't add it speculati
 **API keys never go in `backend/.env.example`.** It is committed, so a real value there lives in git
 history forever. The pattern already in place: `docker-compose.yml` declares
 `GEMINI_API_KEY: ${GEMINI_API_KEY:-}` under `environment:`, and the real value sits in a `.env` at
-the repo root, which `.gitignore` covers. `JUDGE_API_KEY` will follow the same route.
+the repo root, which `.gitignore` covers. `JUDGE_API_KEY` follows the same route.
 
 The db service must stay on `pgvector/pgvector:pg16`; the official `postgres` image lacks the
 extension and startup will fail.
@@ -119,8 +139,8 @@ that mirror the backend Pydantic schemas — update both together. `SearchHit.sc
 better** in all three modes; it is not a distance, and vector mode reports `1 - cosine_distance` so
 the direction stays consistent.
 
-`AskPage` currently calls `/search` and renders raw fragments. When `/ask` lands it switches to that
-endpoint and the response shape changes from `SearchHit[]` to `{answer, found, sources}`.
+`AskPage` calls `/ask` and renders `{answer, found, sources}`: numbered source chips when `found`,
+the abstention message plus the unnumbered retrieved fragments when not.
 
 `pages/AskPage.tsx` began as U-Swap's chat UI; the classes were renamed to this project's vocabulary
 (`ask-layout`, `repo-row`, `answer-panel`, `thread`, `turn`, `ask-form`). `styles.css` still carries

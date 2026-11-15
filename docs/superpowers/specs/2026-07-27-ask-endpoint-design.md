@@ -1,7 +1,7 @@
 # Diseño: `POST /ask` — síntesis con LLM y citas verificables
 
 **Fecha:** 2026-07-27
-**Estado:** aprobado, pendiente de plan de implementación
+**Estado:** implementado (plan: docs/superpowers/plans/2026-11-07-ask-endpoint.md)
 **Antecede:** `2026-07-27-hybrid-retrieval-design.md`, `2026-07-27-rrf-reweighting-design.md`
 
 ## Problema

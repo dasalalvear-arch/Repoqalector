@@ -40,8 +40,8 @@ suite de tests ni linter configurados.
 | `POST /repos` — clonar, trocear, embeder e indexar | ✅ |
 | `GET /repos` · `DELETE /repos/{owner}/{repo}` | ✅ |
 | `POST /search` — recuperación híbrida (vectorial + léxica, fusión RRF ponderada) | ✅ (ver [Resultados de recuperación](#resultados-de-recuperación) — 20% acierto@1, 66% acierto@5; no alcanza el objetivo del 80%) |
-| Frontend: selector de repo + búsqueda con citas | ✅ |
-| `POST /ask` — síntesis con LLM sobre los chunks | ⬜ |
+| `POST /ask` — síntesis con LLM sobre los chunks, citas por índice | ✅ (ver [Resultados de `/ask`](#resultados-de-ask)) |
+| Frontend: selector de repo + respuesta con citas numeradas | ✅ |
 | Set de evaluación (15 preguntas con respuesta conocida, varias con más de un archivo válido) | ✅ |
 
 **Por qué `/search` antes que `/ask`:** si la recuperación trae los fragmentos equivocados, ningún
@@ -107,6 +107,42 @@ contra ruido. El siguiente paso natural es el reranking con cross-encoder.
 
 Reproducir: `docker compose exec backend python -m app.services.evaluate eval/uswap.json <modo>`
 
+## Resultados de `/ask`
+
+Mismo repo y mismas 15 preguntas. Responde `gemini-3.5-flash-lite` sobre los 5 fragmentos del
+modo híbrido. Lo que el modelo *debía* hacer sale del propio set: si el archivo esperado entró en
+lo recuperado, debía responder; si no, debía abstenerse.
+
+| Métrica | Resultado |
+|---|---|
+| Respondió cuando debía | 9/10 (90%) |
+| Se abstuvo cuando debía | 2/5 (40%) |
+| Citas inválidas (índice fuera de rango) | 1 |
+| Fundamentadas según el juez (`openai/gpt-oss-120b`, vía Groq) | 11/12 (91%) |
+
+Las dos primeras son un intercambio: un prompt más miedoso sube una y hunde la otra, así que se
+leen juntas.
+
+**El 40% de abstención es menos grave de lo que parece.** En las 3 preguntas donde respondió sin
+tener el archivo esperado, citó `RESUMEN.md` — la documentación en prosa del repo, que sí describe
+lo preguntado. El juez dio por fundamentadas 2 de esas 3: la respuesta estaba respaldada por un
+fragmento real, solo que no por el archivo que el set considera correcto. Es el mismo problema de
+recuperación de arriba (la prosa le gana al código), visto desde la respuesta.
+
+**La cita inválida no llegó al usuario.** Como las citas se producen por índice, una referencia a
+un fragmento que no existe se descarta al parsear y se cuenta. Ocurrió en una respuesta, y es la
+misma que el juez marcó como no fundamentada: quedó una afirmación sin respaldo. El objetivo era 0;
+se reporta 1 en vez de ajustar el prompt contra 15 preguntas hasta que desaparezca.
+
+El juez es de otra familia de modelos que el que responde, para que no se evalúe a sí mismo. Sigue
+siendo un LLM: el 91% es una señal, no una verificación.
+
+Reproducir: `docker compose exec backend python -m app.services.evaluate_ask eval/uswap.json`
+
+Las respuestas y los veredictos quedan guardados en `backend/eval/uswap.answers.json`, así que
+volver a correr no gasta cuota. Se regeneran solas si cambia el modelo o el prompt; si cambia la
+recuperación, hay que borrar el archivo.
+
 ## Uso
 
 ```bash
@@ -115,6 +151,18 @@ curl -X POST http://localhost:8000/repos -H "Content-Type: application/json" -d 
 
 ```bash
 curl -X POST http://localhost:8000/search -H "Content-Type: application/json" -d "{\"repo\":\"owner/repo\",\"question\":\"donde se valida el login\"}"
+```
+
+```bash
+curl -X POST http://localhost:8000/ask -H "Content-Type: application/json" -d "{\"repo\":\"owner/repo\",\"question\":\"donde se valida el login\"}"
+```
+
+`/ask` necesita una key de Gemini; `/repos` y `/search` funcionan sin ella. Las keys van en un
+`.env` en la raíz del repo (está en `.gitignore`), nunca en `backend/.env.example`:
+
+```
+GEMINI_API_KEY=...   # obligatoria para /ask
+JUDGE_API_KEY=...    # opcional, solo para el juez de la evaluación
 ```
 
 Reindexar el mismo repo reemplaza sus chunks. La primera búsqueda tras levantar el contenedor tarda
@@ -128,6 +176,9 @@ No hay suite de tests. Lo que sí hay:
 cd frontend && npm run build                                  # tsc -b, el gate de tipos
 docker compose exec backend python -m app.services.chunker    # límites de las ventanas
 docker compose exec backend python -m app.services.ingest     # validación de URLs
+docker compose exec backend python -m app.services.retrieval  # tsquery y fusión RRF
+docker compose exec backend python -m app.services.synthesis  # parseo de citas
+docker compose exec backend python -m app.services.evaluate_ask --check   # métricas y veredicto del juez
 ```
 
 ## Modelo de datos
