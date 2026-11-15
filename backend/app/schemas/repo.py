@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SearchMode = Literal["vector", "lexical", "hybrid"]
+SearchMode = Literal["vector", "lexical", "hybrid", "rerank"]
 
 
 class IndexRepoRequest(BaseModel):
@@ -35,9 +35,10 @@ class SearchHit(BaseModel):
     line_start: int
     line_end: int
     content: str
-    # Mayor es mejor, en los tres modos. No es una distancia: el puntaje de RRF
-    # no tiene unidad, y en modo vectorial se reporta 1 - distancia_coseno para
-    # que la direccion sea la misma y las comparaciones no se inviertan.
+    # Mayor es mejor, en todos los modos. No es una distancia: el puntaje de
+    # RRF no tiene unidad, en modo vectorial se reporta 1 - distancia_coseno, y
+    # en modo rerank es el puntaje del cross-encoder. La direccion es siempre
+    # la misma para que las comparaciones no se inviertan.
     score: float
 
 

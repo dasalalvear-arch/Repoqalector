@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.chunk import TEXT_SEARCH_CONFIG, CodeChunk
 from app.schemas.repo import SearchHit
+from app.services import rerank
 from app.services.embeddings import embed_one
 
 CANDIDATES_PER_RANKER = 30
@@ -127,10 +128,11 @@ def search(
     top_k: int = 5,
     mode: str = "hybrid",
 ) -> list[SearchHit]:
-    """Busqueda semantica, lexica o fusionada sobre un repo indexado.
+    """Busqueda semantica, lexica, fusionada o fusionada y reordenada.
 
-    `mode` existe para poder medir cada mitad por separado en la evaluacion. La
-    ruta HTTP usa "hybrid"; los otros dos modos son instrumentos de medicion.
+    `mode` existe para poder medir cada etapa por separado en la evaluacion:
+    "vector" y "lexical" son las dos mitades, "hybrid" su fusion, y "rerank" la
+    fusion reordenada por un cross-encoder.
     """
     if mode == "vector":
         return _to_hits(_vector_candidates(db, repo, question), top_k)
@@ -148,6 +150,12 @@ def search(
     ]
     # El orden coincide con ranked_ids: vectorial primero, lexico segundo.
     fused = fuse(ranked_ids, paths, [1.0, LEXICAL_WEIGHT])
+    if mode == "rerank":
+        # El pool entero, sin recortar: cortar antes dejaria fuera justo los
+        # fragmentos enterrados que el reranker viene a rescatar. DOC_WEIGHT ya
+        # no influye aqui, porque el orden lo decide el cross-encoder.
+        pool = [by_id[chunk_id] for chunk_id, _ in fused]
+        return _to_hits(rerank.rerank(question, pool), top_k)
     return _to_hits([(by_id[chunk_id], score) for chunk_id, score in fused], top_k)
 
 
