@@ -1,0 +1,25 @@
+
+Repo:  dasalalvear-arch/u-swap
+Modo:  rerank [cross-encoder/ms-marco-MiniLM-L-6-v2] | Preguntas: 15 | top_k=5
+
+  FALLA donde se valida que el correo sea @utem.cl         -> routes/auth.py         trajo README.md
+  FALLA que algoritmo se usa para hashear las contrasenas  -> core/security.py       trajo RESUMEN.md
+  FALLA como se genera el token JWT de acceso              -> core/security.py       trajo RESUMEN.md
+  FALLA donde se define la tabla de usuarios               -> models/user.py         trajo RESUMEN.md
+  top5  como se crea el usuario administrador al arrancar  -> services/seed.py       rank 4
+  top5  que endpoint devuelve las metricas del panel de ad -> routes/admin.py        rank 4
+  FALLA como se filtra el catalogo por categoria           -> routes/items.py        trajo RESUMEN.md
+  FALLA donde se guardan las imagenes de una publicacion   -> models/item.py         trajo RESUMEN.md
+  top5  como se envia un mensaje en el chat                -> routes/chat.py         rank 3
+  FALLA que estados puede tener una solicitud de intercamb -> models/match.py        trajo docs/GUIA_EQUIPO.md
+  top5  como se limita la cantidad de intentos de login    -> core/limiter.py        rank 5
+  FALLA donde se configura la conexion a la base de datos  -> core/database.py       trajo README.md
+  top5  como sabe el frontend que el token expiro          -> services/api.ts        rank 2
+  FALLA donde se decide si un usuario es admin             -> api/dependencies.py    trajo RESUMEN.md
+  FALLA que cabeceras de seguridad devuelve la api         -> app/main.py            trajo RESUMEN.md
+
+  acierto@1:  0/15 (0%)
+  acierto@5:  5/15 (33%)
+  doc en el primer puesto: 13/15
+  latencia:   mediana 2.02s | max 2.44s
+

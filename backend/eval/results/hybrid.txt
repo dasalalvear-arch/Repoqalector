@@ -1,0 +1,25 @@
+
+Repo:  dasalalvear-arch/u-swap
+Modo:  hybrid | Preguntas: 15 | top_k=5
+
+  OK    donde se valida que el correo sea @utem.cl         -> routes/auth.py         rank 1
+  top5  que algoritmo se usa para hashear las contrasenas  -> core/security.py       rank 4
+  top5  como se genera el token JWT de acceso              -> core/security.py       rank 2
+  FALLA donde se define la tabla de usuarios               -> models/user.py         trajo backend/app/services/schema.py
+  OK    como se crea el usuario administrador al arrancar  -> services/seed.py       rank 1
+  top5  que endpoint devuelve las metricas del panel de ad -> routes/admin.py        rank 2
+  FALLA como se filtra el catalogo por categoria           -> routes/items.py        trajo backend/app/api/routes/categories.py
+  FALLA donde se guardan las imagenes de una publicacion   -> models/item.py         trajo frontend/src/pages/PublishPage.tsx
+  top5  como se envia un mensaje en el chat                -> routes/chat.py         rank 4
+  top5  que estados puede tener una solicitud de intercamb -> models/match.py        rank 5
+  top5  como se limita la cantidad de intentos de login    -> core/limiter.py        rank 2
+  FALLA donde se configura la conexion a la base de datos  -> core/database.py       trajo backend/app/api/routes/admin.py
+  OK    como sabe el frontend que el token expiro          -> services/api.ts        rank 1
+  FALLA donde se decide si un usuario es admin             -> api/dependencies.py    trajo backend/app/services/seed.py
+  top5  que cabeceras de seguridad devuelve la api         -> app/main.py            rank 2
+
+  acierto@1:  3/15 (20%)
+  acierto@5:  10/15 (66%)
+  doc en el primer puesto: 0/15
+  latencia:   mediana 0.02s | max 0.02s
+

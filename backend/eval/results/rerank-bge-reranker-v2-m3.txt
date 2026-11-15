@@ -1,0 +1,25 @@
+
+Repo:  dasalalvear-arch/u-swap
+Modo:  rerank [BAAI/bge-reranker-v2-m3] | Preguntas: 15 | top_k=5
+
+  top5  donde se valida que el correo sea @utem.cl         -> routes/auth.py         rank 4
+  top5  que algoritmo se usa para hashear las contrasenas  -> core/security.py       rank 5
+  OK    como se genera el token JWT de acceso              -> core/security.py       rank 1
+  FALLA donde se define la tabla de usuarios               -> models/user.py         trajo frontend/src/pages/AdminPage.tsx
+  top5  como se crea el usuario administrador al arrancar  -> services/seed.py       rank 2
+  FALLA que endpoint devuelve las metricas del panel de ad -> routes/admin.py        trajo frontend/src/pages/AdminPage.tsx
+  top5  como se filtra el catalogo por categoria           -> routes/items.py        rank 2
+  FALLA donde se guardan las imagenes de una publicacion   -> models/item.py         trajo docs/superpowers/specs/2026-07-06-image-upload-dropzone-design.md
+  OK    como se envia un mensaje en el chat                -> routes/chat.py         rank 1
+  FALLA que estados puede tener una solicitud de intercamb -> models/match.py        trajo RESUMEN.md
+  OK    como se limita la cantidad de intentos de login    -> core/limiter.py        rank 1
+  top5  donde se configura la conexion a la base de datos  -> core/database.py       rank 4
+  OK    como sabe el frontend que el token expiro          -> services/api.ts        rank 1
+  OK    donde se decide si un usuario es admin             -> api/dependencies.py    rank 1
+  top5  que cabeceras de seguridad devuelve la api         -> app/main.py            rank 2
+
+  acierto@1:  5/15 (33%)
+  acierto@5:  11/15 (73%)
+  doc en el primer puesto: 8/15
+  latencia:   mediana 41.54s | max 50.50s
+
