@@ -21,7 +21,11 @@
           "content": "from fastapi import APIRouter, Depends, HTTPException, Request, status\nfrom sqlalchemy.orm import Session\n\nfrom app.api.dependencies import get_current_user\nfrom app.core.database import get_db\nfrom app.core.limiter import limiter\nfrom app.core.security import create_access_token, hash_password, verify_password\nfrom app.models.user import User, UserRole\nfrom app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse\nfrom app.schemas.user import UserRead\n\nrouter = APIRouter()\n\n\ndef validate_utem_email(email: str) -> None:\n    if not email.lower().endswith(\"@utem.cl\"):\n        raise HTTPException(\n            status_code=status.HTTP_400_BAD_REQUEST,\n            detail=\"Solo se permiten correos institucionales @utem.cl\",\n        )\n\n\n@router.post(\"/register\", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)\n@limiter.limit(\"5/minute\")\ndef register(\n    request: Request, payload: RegisterRequest, db: Session = Depends(get_db)\n) -> TokenResponse:\n    validate_utem_email(str(payload.email))\n    existing_user = db.query(User).filter(User.email == str(payload.email).lower()).first()\n    if existing_user:\n        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=\"Email already registered\")\n\n    user = User(\n        name=payload.name,\n        email=str(payload.email).lower(),\n        password_hash=hash_password(payload.password),\n        career=payload.career,\n        role=UserRole.STUDENT,  # Siempre STUDENT desde registro\n    )\n    db.add(user)\n    db.commit()\n    return TokenResponse(access_token=create_access_token(user.email))\n\n\n@router.post(\"/login\", response_model=TokenResponse)\n@limiter.limit(\"10/minute\")\ndef login(\n    request: Request, payload: LoginRequest, db: Session = Depends(get_db)\n) -> TokenResponse:\n    user = db.query(User).filter(User.email == str(payload.email).lower()).first()",
           "score": 0.0434
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "que algoritmo se usa para hashear las contrasenas": {
       "retrieved": [
@@ -42,7 +46,11 @@
           "content": "from datetime import datetime, timedelta, timezone\nfrom typing import Any\n\nfrom jose import JWTError, jwt\nfrom passlib.context import CryptContext\n\nfrom app.core.config import settings\n\npassword_context = CryptContext(schemes=[\"bcrypt\"], deprecated=\"auto\")\n\n\ndef hash_password(password: str) -> str:\n    return password_context.hash(password)\n\n\ndef verify_password(password: str, password_hash: str) -> bool:\n    return password_context.verify(password, password_hash)\n\n\ndef create_access_token(subject: str) -> str:\n    expires_at = datetime.now(timezone.utc) + timedelta(\n        minutes=settings.access_token_expire_minutes\n    )\n    payload: dict[str, Any] = {\"sub\": subject, \"exp\": expires_at}\n    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)\n\n\ndef decode_access_token(token: str) -> str | None:\n    try:\n        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])\n        subject = payload.get(\"sub\")\n        return subject if isinstance(subject, str) else None\n    except JWTError:\n        return None",
           "score": 0.0328
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "como se genera el token JWT de acceso": {
       "retrieved": [
@@ -70,7 +78,11 @@
           "content": "from functools import lru_cache\n\nfrom pydantic import Field\nfrom pydantic_settings import BaseSettings, SettingsConfigDict\n\n\nclass Settings(BaseSettings):\n    project_name: str = \"U-Swap API\"\n    database_url: str = \"postgresql+psycopg://uswap:uswap@localhost:5432/uswap\"\n    # Obligatorio y sin default: si no se define JWT_SECRET_KEY en el entorno,\n    # la app falla al arrancar en vez de firmar tokens con una clave conocida.\n    jwt_secret_key: str = Field(min_length=32)\n    jwt_algorithm: str = \"HS256\"\n    access_token_expire_minutes: int = 60 * 24\n    cors_origins: list[str] = [\"http://localhost:5173\"]\n\n    # Admin sembrado al arrancar. Si admin_email/admin_password estan vacios,\n    # no se crea ningun admin (la app funciona igual, sin panel disponible).\n    admin_email: str | None = None\n    admin_password: str | None = None\n    admin_name: str = \"Administrador U-Swap\"\n\n    model_config = SettingsConfigDict(env_file=\".env\", env_file_encoding=\"utf-8\")\n\n\n@lru_cache\ndef get_settings() -> Settings:\n    return Settings()\n\n\nsettings = get_settings()",
           "score": 0.045
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "donde se define la tabla de usuarios": {
       "retrieved": [
@@ -91,7 +103,11 @@
           "content": "- **Moderación de publicaciones:** aprobar, ocultar o eliminar; búsqueda y filtro\n  por estado de moderación.\n- **Gestión de usuarios:** listar y eliminar cuentas.\n\n> El administrador **no** se crea desde la API. Se siembra al arrancar a partir de\n> las variables `ADMIN_EMAIL` / `ADMIN_PASSWORD` del entorno. El registro público\n> siempre asigna el rol `STUDENT`.\n\n---\n\n## 3. Arquitectura\n\n### Backend (`backend/app/`)\nEstructura FastAPI en capas; cada dominio (auth, users, items, categories, matches,\nchat, admin) tiene un archivo paralelo en cada carpeta:\n\n- `models/` — ORM SQLAlchemy (tablas: `users`, `categories`, `items`, `item_images`, `matches`, `messages`).\n- `schemas/` — formas de request/response con Pydantic.\n- `api/routes/` — endpoints, montados en `main.py` bajo su prefijo.\n- `core/` — infraestructura transversal: `config.py`, `database.py`, `security.py` (bcrypt + JWT), `limiter.py`.\n- `services/` — lógica de arranque: `seed.py` (admin + categorías), `schema.py` (parches de columnas), `seed_demo.py` (datos de prueba).\n\n**Secuencia de arranque** (`main.py`, a nivel de import):\n`Base.metadata.create_all()` → `ensure_runtime_schema()` (agrega columnas añadidas\ndespués: `role`, `moderation_status`, `is_reported`) → `create_admin()` +\n`ensure_default_categories()`. No hay migraciones; `schema.py` es el sustituto\nhecho a mano e idempotente.\n\n### Frontend (`frontend/src/`)\nSPA con React Router. Páginas: Auth, Catálogo, Publicar, Solicitudes, Mis\npublicaciones y Admin (cada una protegida según el rol).\n\n- `services/api.ts` — única fuente de verdad: instancia Axios + todos los tipos TS\n  (espejo de los schemas del backend). Un interceptor agrega el token bearer desde\n  `localStorage[\"uswap.token\"]`; otro detecta 401 con sesión activa, limpia el token\n  y emite el evento `uswap:unauthorized`.\n- `hooks/useAuth.ts` — máquina de estado de autenticación: lee el token, hidrata el\n  usuario con `/auth/me`, escucha `uswap:unauthorized` para forzar logout y `login()`\n  devuelve el rol para redirigir estudiante vs. admin.\n\n---\n\n## 4. Modelo de datos\n\n| Tabla | Campos clave | Notas |\n|---|---|---|\n| `users` | id, name, email (único), password_hash, career, **role** | role: `STUDENT` / `ADMIN` |\n| `categories` | id, name (único) | Se siembran `Tecnologia`, `Papeleria`, `Bibliografia` |\n| `items` | id, title, description, condition, category_id, owner_id, **status**, **moderation_status**, created_at | status: `AVAILABLE` / `RESERVED` / `DELIVERED` · moderación: `pending` / `approved` / `hidden` |\n| `item_images` | id, item_id, image_url | Imágenes como URLs (http/https) |",
           "score": 0.0326
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "como se crea el usuario administrador al arrancar": {
       "retrieved": [
@@ -119,7 +135,11 @@
           "content": "# U-Swap — Resumen del proyecto\n\n**U-Swap** es un marketplace de **economía circular** para estudiantes de la UTEM.\nPermite registrarse con correo institucional `@utem.cl`, publicar artículos que ya no\nse usan (libros, calculadoras, apuntes, material de laboratorio, etc.), solicitar\nintercambios y coordinar la entrega presencial mediante un chat por solicitud.\n**No hay pagos ni transacciones monetarias**: el objetivo es reutilizar recursos\ndentro de la comunidad universitaria.\n\n- **Interfaz:** en español, orientada a estudiantes.\n- **Código:** en inglés (identificadores y comentarios); textos visibles en español.\n- **Repositorio:** monorepo con `backend/` (API) y `frontend/` (SPA).\n\n---\n\n## 1. Stack tecnológico\n\n| Capa | Tecnologías |\n|---|---|\n| **Frontend** | React + TypeScript, Vite, React Router, Axios, `lucide-react` (íconos), PWA (service worker) |\n| **Backend** | FastAPI, SQLAlchemy 2.0, Pydantic / pydantic-settings, python-jose (JWT), passlib + bcrypt, slowapi (rate limiting) |\n| **Base de datos** | PostgreSQL 16 (driver `psycopg` 3) |\n| **Infraestructura** | Docker Compose (db + backend + frontend) |\n\n---\n\n## 2. Funcionalidades\n\n### Estudiante (rol `STUDENT`)\n- **Registro / login** con correo `@utem.cl` y contraseña (mínimo 8 caracteres).\n- **Catálogo:** explorar publicaciones con buscador y filtro por categoría (chips).\n- **Publicar** artículos (título, descripción, estado, categoría, URL de imagen opcional).\n- **Solicitudes:** pedir un intercambio sobre el artículo de otra persona.\n- **Chat por solicitud** para coordinar punto y horario de entrega dentro del campus.\n- **Mis publicaciones:** panel para ver los artículos propios, marcarlos como\n  entregados / reactivarlos y eliminarlos.\n\n### Administrador (rol `ADMIN`)\n- **Panel de KPIs:** usuarios registrados, publicaciones activas, solicitudes\n  generadas e intercambios completados.\n- **Moderación de publicaciones:** aprobar, ocultar o eliminar; búsqueda y filtro\n  por estado de moderación.\n- **Gestión de usuarios:** listar y eliminar cuentas.\n\n> El administrador **no** se crea desde la API. Se siembra al arrancar a partir de\n> las variables `ADMIN_EMAIL` / `ADMIN_PASSWORD` del entorno. El registro público\n> siempre asigna el rol `STUDENT`.\n\n---",
           "score": 0.0344
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "que endpoint devuelve las metricas del panel de admin": {
       "retrieved": [
@@ -140,7 +160,11 @@
           "content": "from datetime import date, datetime, time\n\nfrom fastapi import APIRouter, Depends, HTTPException, Query, status\nfrom sqlalchemy.orm import Session, joinedload\n\nfrom app.api.dependencies import get_current_admin\nfrom app.core.database import get_db\nfrom app.models.item import Item, ItemModerationStatus, ItemStatus\nfrom app.models.match import Match\nfrom app.models.user import User, UserRole\nfrom app.schemas.admin import MetricsRead\nfrom app.schemas.item import ItemRead\nfrom app.schemas.user import UserRead\n\nrouter = APIRouter()\n\n\n@router.get(\"/metrics\", response_model=MetricsRead)\ndef get_metrics(\n    db: Session = Depends(get_db),\n    _admin: User = Depends(get_current_admin),\n) -> MetricsRead:\n    # Los KPIs miden alcance real de la app: no se cuenta al admin como usuario.\n    return MetricsRead(\n        registered_users=db.query(User).filter(User.role == UserRole.STUDENT).count(),\n        active_listings=db.query(Item).filter(Item.status == ItemStatus.available).count(),\n        matches_generated=db.query(Match).count(),\n        completed_exchanges=db.query(Item).filter(Item.status == ItemStatus.delivered).count(),\n    )\n\n\n@router.get(\"/users\", response_model=list[UserRead])\ndef list_users(\n    db: Session = Depends(get_db),\n    _admin: User = Depends(get_current_admin),\n) -> list[User]:\n    return db.query(User).order_by(User.created_at.desc()).all()\n\n\n@router.delete(\"/users/{user_id}\", status_code=status.HTTP_204_NO_CONTENT)\ndef delete_user(\n    user_id: int,\n    db: Session = Depends(get_db),\n    admin: User = Depends(get_current_admin),\n) -> None:\n    if user_id == admin.id:\n        raise HTTPException(\n            status_code=status.HTTP_400_BAD_REQUEST,\n            detail=\"No puedes eliminar tu propia cuenta de administrador\",\n        )",
           "score": 0.0457
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "como se filtra el catalogo por categoria": {
       "retrieved": [
@@ -174,7 +198,11 @@
           "content": "---\n\n## 4. Modelo de datos\n\n| Tabla | Campos clave | Notas |\n|---|---|---|\n| `users` | id, name, email (único), password_hash, career, **role** | role: `STUDENT` / `ADMIN` |\n| `categories` | id, name (único) | Se siembran `Tecnologia`, `Papeleria`, `Bibliografia` |\n| `items` | id, title, description, condition, category_id, owner_id, **status**, **moderation_status**, created_at | status: `AVAILABLE` / `RESERVED` / `DELIVERED` · moderación: `pending` / `approved` / `hidden` |\n| `item_images` | id, item_id, image_url | Imágenes como URLs (http/https) |\n| `matches` | id, item_id, requester_id, owner_id, status, created_at | status: `PENDING` / `ACCEPTED` / `REJECTED` / `COMPLETED` |\n| `messages` | id, match_id, sender_id, content, created_at | Chat por solicitud |\n\n---\n\n## 5. API (endpoints principales)\n\n| Módulo | Endpoints |\n|---|---|\n| **Auth** | `POST /auth/register` · `POST /auth/login` · `GET /auth/me` |\n| **Usuarios** | `GET /users/{id}` · `PUT /users/{id}` |\n| **Publicaciones** | `GET /items` (filtros: `search`, `category_id`, `owner_id`, `skip`, `limit`) · `POST /items` · `GET /items/{id}` · `PUT /items/{id}` · `DELETE /items/{id}` |\n| **Categorías** | `GET /categories` |\n| **Solicitudes** | `POST /matches` · `GET /matches` · `PUT /matches/{id}` |\n| **Chat** | `GET /chat/{match_id}` · `POST /chat/{match_id}` |\n| **Admin** | `GET /admin/metrics` · `GET /admin/users` · `DELETE /admin/users/{id}` · `GET /admin/items` · `PUT /admin/items/{id}/approve` · `PUT /admin/items/{id}/hide` · `DELETE /admin/items/{id}` |\n| **Salud** | `GET /health` |\n\nDocumentación interactiva (Swagger): `http://localhost:8000/docs`.\n\n---\n\n## 6. Flujo de usuario\n\n```\nRegistro/Login  →  Catálogo (portada)  →  Publicar  /  Solicitudes + Chat  /  Mis publicaciones\n                                       →  (rol ADMIN)  →  Panel de administración\n```\n\nTras registrarse, el usuario aterriza en el catálogo. Desde la barra de navegación\naccede a las demás secciones; el administrador es redirigido a su panel al iniciar\nsesión.\n\n---\n\n## 7. Seguridad\n\n- **Autenticación:** tokens JWT bearer; el `sub` del token es el email del usuario.\n- **Autorización:** dependencias `get_current_user` y `get_current_admin` (403 si el\n  rol no es `ADMIN`). Las acciones sobre un artículo (editar/eliminar) verifican que",
           "score": 0.0327
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "como se envia un mensaje en el chat": {
       "retrieved": [
@@ -195,7 +223,11 @@
           "content": "<form className=\"message-form\" onSubmit={sendMessage}>\n              <input name=\"content\" placeholder=\"Coordinar punto y horario dentro del campus\" />\n              <button className=\"icon-button\" title=\"Enviar\">\n                <Send size={18} />\n              </button>\n            </form>\n          </>\n        ) : (\n          <div className=\"empty-state\">\n            <h2>Selecciona una solicitud.</h2>\n            <p>Cuando solicites o recibas una solicitud, el chat aparecera aqui.</p>\n          </div>\n        )}\n      </div>\n    </section>\n  );\n}",
           "score": 0.0402
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "que estados puede tener una solicitud de intercambio": {
       "retrieved": [
@@ -236,7 +268,11 @@
           "content": "from slowapi import Limiter\nfrom slowapi.util import get_remote_address\n\n# Limiter compartido. Vive en su propio modulo para que tanto main.py\n# (registro del handler) como las rutas (decoradores) lo importen sin\n# crear dependencias circulares.\nlimiter = Limiter(key_func=get_remote_address)",
           "score": 0.0451
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "donde se configura la conexion a la base de datos": {
       "retrieved": [
@@ -270,7 +306,11 @@
           "content": "match_id: number;\n  sender_id: number;\n  content: string;\n  created_at: string;\n};\n\nexport type Metrics = {\n  registered_users: number;\n  active_listings: number;\n  matches_generated: number;\n  completed_exchanges: number;\n};\n\nexport const TOKEN_KEY = \"uswap.token\";\nexport const UNAUTHORIZED_EVENT = \"uswap:unauthorized\";\n\nexport const api = axios.create({\n  baseURL: import.meta.env.VITE_API_URL ?? \"http://localhost:8000\",\n});\n\napi.interceptors.request.use((config) => {\n  const token = localStorage.getItem(TOKEN_KEY);\n  if (token) {\n    config.headers.Authorization = `Bearer ${token}`;\n  }\n  return config;\n});\n\n// Si el backend responde 401 teniendo una sesion activa, el token expiro o\n// fue revocado: lo limpiamos y avisamos a la app para cerrar sesion. No se\n// dispara en el login (ahi no hay token y el formulario maneja el error).\napi.interceptors.response.use(\n  (response) => response,\n  (error) => {\n    const hadSession = localStorage.getItem(TOKEN_KEY) !== null;\n    if (error.response?.status === 401 && hadSession) {\n      localStorage.removeItem(TOKEN_KEY);\n      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));\n    }\n    return Promise.reject(error);\n  },\n);",
           "score": 0.0467
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     },
     "donde se decide si un usuario es admin": {
       "retrieved": [
@@ -305,7 +345,11 @@
           "content": ")}\n        </NavLink>\n        {user?.role === \"ADMIN\" && (\n          <NavLink to=\"/admin\">\n            <Shield size={17} />\n            Admin\n          </NavLink>\n        )}\n      </nav>\n      <div className=\"session\">\n        {user ? (\n          <>\n            <span>{user.name}</span>\n            <button className=\"icon-button\" onClick={onLogout} title=\"Cerrar sesion\">\n              <LogOut size={18} />\n            </button>\n          </>\n        ) : (\n          <NavLink className=\"login-link\" to=\"/auth\">\n            Entrar\n          </NavLink>\n        )}\n      </div>\n    </header>\n  );\n}",
           "score": 0.0346
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": false
+      }
     },
     "que cabeceras de seguridad devuelve la api": {
       "retrieved": [
@@ -326,7 +370,11 @@
           "content": "from fastapi import FastAPI, Request\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom slowapi import _rate_limit_exceeded_handler\nfrom slowapi.errors import RateLimitExceeded\nfrom starlette.middleware.base import BaseHTTPMiddleware\n\nfrom app.api.routes import auth, categories, chat, items, matches, users, admin\nfrom app.core.config import settings\nfrom app.core.database import Base, engine, SessionLocal\nfrom app.core.limiter import limiter\nfrom app.services.schema import ensure_runtime_schema\nfrom app.services.seed import create_admin, ensure_default_categories\n\nBase.metadata.create_all(bind=engine)\nensure_runtime_schema(engine)\n\ndb = SessionLocal()\ntry:\n    create_admin()\n    ensure_default_categories(db)\nfinally:\n    db.close()\n\napp = FastAPI(title=settings.project_name, version=\"0.1.0\")\n\n# Rate limiting global (slowapi). Las rutas sensibles se decoran con\n# @limiter.limit(...). Una peticion sobre el limite devuelve 429.\napp.state.limiter = limiter\napp.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)\n\n\nclass SecurityHeadersMiddleware(BaseHTTPMiddleware):\n    \"\"\"Defense-in-depth: la API solo devuelve JSON, nunca HTML navegable.\n    Estos headers evitan sniffing de contenido, embedding en iframes y\n    fuga de Referer hacia terceros.\"\"\"\n\n    async def dispatch(self, request: Request, call_next):\n        response = await call_next(request)\n        response.headers[\"X-Content-Type-Options\"] = \"nosniff\"\n        response.headers[\"X-Frame-Options\"] = \"DENY\"\n        response.headers[\"Referrer-Policy\"] = \"no-referrer\"\n        response.headers[\"Content-Security-Policy\"] = \"default-src 'none'; frame-ancestors 'none'\"\n        return response\n\n\napp.add_middleware(SecurityHeadersMiddleware)\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=settings.cors_origins,",
           "score": 0.0443
         }
-      ]
+      ],
+      "judge": {
+        "model": "openai/gpt-oss-120b",
+        "grounded": true
+      }
     }
   }
 }

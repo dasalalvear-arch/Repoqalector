@@ -16,6 +16,10 @@ por dia por modelo y una corrida son 15, asi que cada respuesta se guarda en
 siguiente corrida retoma donde quedo en vez de volver a pagar lo ya generado.
 Las metricas (y el juez) se calculan desde ese archivo, sin llamar a Gemini.
 
+El juez (opcional, JUDGE_API_KEY) verifica que cada afirmacion de la respuesta
+este respaldada por un fragmento citado. Su veredicto tambien se guarda, asi
+que volver a correr no lo vuelve a pagar.
+
 Si cambia el modelo o el prompt, las respuestas guardadas se descartan solas.
 Si cambia la recuperacion (pesos, reindexado), borra el archivo a mano.
 
@@ -31,6 +35,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.schemas.repo import SearchHit
 from app.services import llm, retrieval, synthesis
 from app.services.evaluate import load_set
 
@@ -39,6 +44,16 @@ TOP_K = 5
 # gratuito. No protege del limite diario: eso lo cubre guardar y retomar.
 # Con un plan pago se puede bajar a 0.
 PAUSE_SECONDS = 13.0
+
+# Limite por minuto del proveedor del juez (Groq gratis: 30/min).
+JUDGE_PAUSE_SECONDS = 3.0
+
+JUDGE_PROMPT = """Eres un verificador. Recibes una respuesta sobre un repositorio de codigo y los fragmentos numerados en que debia basarse.
+
+Divide la respuesta en afirmaciones. Para cada una, indica el numero del fragmento que la sostiene, o null si ninguno la sostiene. Juzga SOLO si los fragmentos la respaldan, no si es cierta en general.
+
+Responde solo con JSON, sin texto alrededor:
+{"claims": [{"claim": "...", "fragment": 1}]}"""
 
 Questions = list[tuple[str, list[str]]]
 
@@ -111,6 +126,51 @@ def generate(eval_path: Path) -> tuple[Questions, dict[str, dict]]:
     return questions, answers
 
 
+def _verdict(raw: str, n_sources: int) -> bool | None:
+    """Fundamentada = toda afirmacion apunta a un fragmento existente.
+
+    Se deriva de las afirmaciones en vez de pedirle un veredicto suelto: obliga
+    al juez a trabajar en vez de opinar. None = salida ilegible, que se reporta
+    aparte y nunca cuenta como fundamentada.
+    """
+    try:
+        claims = json.loads(raw[raw.index("{") : raw.rindex("}") + 1])["claims"]
+        return bool(claims) and all(c["fragment"] in range(1, n_sources + 1) for c in claims)
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _judged(record: dict) -> bool:
+    """Tiene veredicto guardado del juez configurado ahora (otro juez no cuenta)."""
+    return record["found"] and record.get("judge", {}).get("model") == settings.judge_model
+
+
+def judge_saved(eval_path: Path, answers: dict[str, dict]) -> None:
+    """Juzga las respuestas guardadas que faltan. Gasta cuota del juez, nunca de Gemini."""
+    if not settings.judge_api_key:
+        return
+    path = eval_path.with_suffix(".answers.json")
+    pending = [r for r in answers.values() if r["found"] and not _judged(r)]
+    for i, record in enumerate(pending):
+        if i:
+            time.sleep(JUDGE_PAUSE_SECONDS)
+        hits = [SearchHit(**source) for source in record["sources"]]
+        messages = [
+            {"role": "system", "content": JUDGE_PROMPT},
+            {
+                "role": "user",
+                "content": f"Fragmentos:\n\n{synthesis.format_fragments(hits)}\n\nRespuesta:\n{record['answer']}",
+            },
+        ]
+        try:
+            raw = llm.chat(settings.judge_base_url, settings.judge_api_key, settings.judge_model, messages)
+        except llm.LLMError as error:
+            print(f"  Juez detenido en {i + 1}/{len(pending)}: {str(error)[:200]}\n")
+            break
+        record["judge"] = {"model": settings.judge_model, "grounded": _verdict(raw, len(hits))}
+        _save_answers(path, answers)
+
+
 def _retrieved_ok(record: dict, expected: list[str]) -> bool:
     return any(e in path for path in record["retrieved"] for e in expected)
 
@@ -150,12 +210,25 @@ def report(questions: Questions, answers: dict[str, dict]) -> None:
         record = answers.get(question)
         found = record is not None and record["found"]
         cited = ", ".join(source["file_path"] for source in record["sources"]) if found else "-"
-        print(f"  {_mark(record, expected):<8} {question[:48]:<48} citas: {cited}")
+        mark = _mark(record, expected)
+        if found and _judged(record) and record["judge"]["grounded"] is False:
+            mark += " NO-FUND"
+        print(f"  {mark:<16} {question[:48]:<48} citas: {cited}")
 
     counts = summarize(questions, answers)
     print(f"\n  Respondio cuando debia:   {_pct(counts['answered'], counts['should_answer'])}")
     print(f"  Se abstuvo cuando debia:  {_pct(counts['abstained'], counts['should_abstain'])}")
     print(f"  Citas invalidas:          {counts['invalid']}")
+    verdicts = [r["judge"]["grounded"] for r in answers.values() if _judged(r)]
+    if verdicts:
+        readable = [v for v in verdicts if v is not None]
+        print(f"  Fundamentadas (juez):     {_pct(sum(readable), len(readable))}  [{settings.judge_model}]")
+        if len(readable) < len(verdicts):
+            print(f"  Juez ilegible:            {len(verdicts) - len(readable)} (no cuentan como fundamentadas)")
+        if "generativelanguage.googleapis.com" in settings.judge_base_url:
+            print("  SESGO: el juez es de la misma familia que el modelo que responde.")
+    else:
+        print("  Fundamentadas (juez):     omitido — falta JUDGE_API_KEY")
     if counts["missing"]:
         print(f"\n  PARCIAL: faltan {counts['missing']} de {len(questions)}. No reportar estos numeros.")
     print()
@@ -210,7 +283,21 @@ def _self_check() -> None:
         path.write_text(json.dumps({"fingerprint": "otro", "answers": answers}), encoding="utf-8")
         assert _load_answers(path) == {}
 
-    print("evaluate_ask OK — metricas desde respuestas guardadas")
+    ok = '{"claims": [{"claim": "usa bcrypt", "fragment": 1}, {"claim": "x", "fragment": 2}]}'
+    assert _verdict(ok, 2) is True
+    # Una afirmacion sin respaldo basta para que no este fundamentada.
+    assert _verdict('{"claims": [{"claim": "a", "fragment": 1}, {"claim": "b", "fragment": null}]}', 2) is False
+    # Un fragmento que no existe tampoco respalda nada.
+    assert _verdict('{"claims": [{"claim": "a", "fragment": 3}]}', 2) is False
+    # Sin afirmaciones no hay nada que valide la respuesta.
+    assert _verdict('{"claims": []}', 2) is False
+    # Texto alrededor del JSON (los modelos lo agregan) se tolera.
+    assert _verdict("Aqui va:\n" + ok + "\nListo.", 2) is True
+    # Basura = ilegible, no fundamentada.
+    assert _verdict("no se", 2) is None
+    assert _verdict('{"otra": 1}', 2) is None
+
+    print("evaluate_ask OK — metricas desde respuestas guardadas y veredicto del juez")
 
 
 if __name__ == "__main__":
@@ -219,4 +306,7 @@ if __name__ == "__main__":
     if sys.argv[1] == "--check":
         _self_check()
     else:
-        report(*generate(Path(sys.argv[1])))
+        eval_path = Path(sys.argv[1])
+        questions, answers = generate(eval_path)
+        judge_saved(eval_path, answers)
+        report(questions, answers)
