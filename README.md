@@ -103,9 +103,61 @@ Sigue sin alcanzarse el objetivo del 80% en acierto@5 (66%, 10/15). De las 5 pre
 fallan, la mayoría trae otro archivo de código como mejor candidato equivocado — confusión
 código-contra-código que ninguna ponderación arregla. `DOC_WEIGHT` se dejó en `0.7` porque
 la documentación no es lo que ocupa los primeros puestos; moverlo habría sido ajustar
-contra ruido. El siguiente paso natural es el reranking con cross-encoder.
+contra ruido. El paso siguiente fue medir un reranker; ver
+[Reranking con cross-encoder](#reranking-con-cross-encoder).
 
 Reproducir: `docker compose exec backend python -m app.services.evaluate eval/uswap.json <modo>`
+
+### Reranking con cross-encoder
+
+**Se midió y no se adoptó.** `/search` y `/ask` siguen sirviendo el híbrido.
+
+Antes de probar nada se midió dónde queda el archivo esperado dentro del pool completo que arma la
+fusión (35 a 51 fragmentos por pregunta). De las 5 preguntas que fallan, 3 tienen el archivo
+correcto en el pool, enterrado en los puestos 9, 31 y 32; las otras 2 no lo tienen en ningún
+puesto. Reordenar solo puede rescatar las 3 primeras, así que el techo era 13/15.
+
+Un cross-encoder lee la pregunta y el fragmento juntos y puntúa el par. Se probó como etapa final:
+reordena el pool entero y recién ahí se corta a 5. Los tres modelos y la regla de decisión se
+fijaron antes de medir.
+
+| Configuración | acierto@1 | acierto@5 | Doc. en 1.er puesto | Latencia mediana | Latencia máx. |
+|---|---|---|---|---|---|
+| **Híbrido (sin reranking)** | 3/15 | **10/15** | 0/15 | 0,02 s | 0,02 s |
+| `cross-encoder/ms-marco-MiniLM-L-6-v2` (solo inglés, control) | 0/15 | 5/15 | 13/15 | 2,02 s | 2,44 s |
+| `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (multilingüe) | 6/15 | 9/15 | 5/15 | 3,99 s | 4,85 s |
+| `BAAI/bge-reranker-v2-m3` (multilingüe grande) | 5/15 | 11/15 | 8/15 | 41,54 s | 50,50 s |
+
+La regla: se descarta todo modelo con latencia mediana sobre 15 s; entre los que quedan se adopta
+el de mayor acierto@5, solo si supera 10/15.
+
+- **`bge-reranker-v2-m3` fue el único que superó al híbrido, y queda descartado por latencia.**
+  Tarda 41 s por pregunta en CPU, casi el triple del tope. Rescató las tres preguntas enterradas
+  (puestos 1, 2 y 4), pero perdió dos que el híbrido sí traía.
+- **`mmarco-mMiniLMv2` dobla acierto@1 y aun así pierde en acierto@5.** Rescató dos de las tres
+  enterradas, las dos al primer puesto, y perdió tres que el híbrido traía. Cabe en la latencia,
+  pero 9/15 no supera 10/15.
+- **El modelo solo en inglés no sirve para preguntas en español.** Puso documentación en prosa en
+  el primer puesto en 13 de 15 preguntas: sin entender la pregunta, gana el texto que más se le
+  parece en idioma.
+
+Dos cosas que este resultado dice más allá del veredicto. **La prosa vuelve a ganarle al código:**
+el híbrido no pone documentación primero nunca (por `DOC_WEIGHT`), y los rerankers sí, entre 5 y 13
+veces; la rejilla no incluía penalizar documentos en el puntaje del reranker. Y **un reranker no
+solo sube aciertos, también baja los que ya estaban:** los dos modelos multilingües perdieron
+preguntas que el híbrido resolvía con sus anclas léxicas.
+
+Advertencias: con 15 preguntas, la diferencia entre 9, 10 y 11 es de una pregunta por lado y no
+separa de verdad a un modelo de otro; elegir entre tres sobre el mismo set infla al mejor. La
+latencia es de una sola máquina, en CPU.
+
+Qué queda abierto: las dos preguntas ausentes del pool (ampliar `CANDIDATES_PER_RANKER`), y hacer
+viable el modelo grande — GPU o cuantización para la latencia, y una penalización a documentos —
+que serían mediciones nuevas, no ajustes a esta.
+
+El modo `rerank` queda disponible para medir, igual que `vector` y `lexical`. Reproducir:
+`docker compose exec -e RERANK_MODEL=<modelo> backend python -m app.services.evaluate eval/uswap.json rerank`.
+La salida cruda de las cuatro corridas está en `backend/eval/results/`.
 
 ## Resultados de `/ask`
 
@@ -178,6 +230,7 @@ docker compose exec backend python -m app.services.chunker    # límites de las 
 docker compose exec backend python -m app.services.ingest     # validación de URLs
 docker compose exec backend python -m app.services.retrieval  # tsquery y fusión RRF
 docker compose exec backend python -m app.services.synthesis  # parseo de citas
+docker compose exec -e RERANK_MODEL=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 backend python -m app.services.rerank   # el cross-encoder ordena bien un par trivial
 docker compose exec backend python -m app.services.evaluate_ask --check   # métricas y veredicto del juez
 ```
 

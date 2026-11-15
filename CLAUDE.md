@@ -42,8 +42,12 @@ POST /ask     → /search → prompt with numbered chunks → LLM → {answer, s
 ```
 
 **Current state:** ingestion, retrieval and `/ask` work and are measured (design:
-`docs/superpowers/specs/2026-07-27-ask-endpoint-design.md`). The next open item is cross-encoder
-reranking, to move hit@5 from 66% toward the 80% target. The status table in `README.md` is the
+`docs/superpowers/specs/2026-07-27-ask-endpoint-design.md`). Cross-encoder reranking was **measured
+and not adopted** (`docs/superpowers/specs/2026-11-15-cross-encoder-rerank-design.md`): the only
+model that beat hybrid on hit@5 (`BAAI/bge-reranker-v2-m3`, 11/15 vs 10/15) takes 41 s per question
+on CPU against a 15 s ceiling, and the two fast ones scored below hybrid. hit@5 is still 66% against
+an 80% target. Open items: widen the candidate pool (two eval questions never reach it), or make the
+large reranker viable (GPU/quantization, plus a doc penalty). The status table in `README.md` is the
 authority on what exists.
 
 **Retrieval is hybrid, and the numbers matter more than the code here.** Vector search alone scored
@@ -56,8 +60,12 @@ literally in the source. **Before changing anything in retrieval, run the eval a
 ### Measuring (do this before and after any retrieval change)
 
 ```bash
-docker compose exec backend python -m app.services.evaluate eval/uswap.json hybrid   # also: vector, lexical
+docker compose exec backend python -m app.services.evaluate eval/uswap.json hybrid   # also: vector, lexical, rerank
 ```
+
+It also prints latency per question and how often a doc ranks first. `rerank` picks its model from
+`RERANK_MODEL` (`docker compose exec -e RERANK_MODEL=<model> backend ...`). The raw output of the
+reranking grid is kept in `backend/eval/results/`.
 
 The question set is data, not code: `backend/eval/uswap.json`, 15 questions whose correct answer was
 verified by hand, several accepting more than one valid file. `evaluate.py` calls the real
@@ -92,7 +100,10 @@ FastAPI layered layout: `models/`, `schemas/`, `api/routes/`, `services/`. `core
 (pydantic-settings) and `database.py` (engine + `get_db` session dependency).
 
 `services/retrieval.py` holds all search logic — query building, both rankers, RRF fusion, and the
-three modes (`vector`, `lexical`, `hybrid`). Routes are thin HTTP wrappers over it; `/search`'s only
+four modes (`vector`, `lexical`, `hybrid`, `rerank`). `hybrid` is what `/search` and `/ask` serve;
+the other three are measuring instruments. `rerank` passes the whole untruncated fused pool through
+`services/rerank.py` (a lazy-loaded `CrossEncoder`, no new dependency) and deliberately has no
+fallback to `hybrid` — a silent fallback would hide which configuration is being measured. Routes are thin HTTP wrappers over it; `/search`'s only
 job beyond delegating is turning an unknown repo into a 404. Keep it that way, and note that
 `search()` accepts `mode` as a plain `str` and falls through to hybrid on an unrecognized value —
 callers that bypass the HTTP layer must validate it themselves, which `evaluate.py` does.
@@ -136,7 +147,7 @@ Single page, no router — `routes/App.tsx` renders `AskPage` directly. React Ro
 
 `services/api.ts` is the Axios instance plus the shared types (`RepoSummary`, `SearchHit`, `Turn`)
 that mirror the backend Pydantic schemas — update both together. `SearchHit.score` means **higher is
-better** in all three modes; it is not a distance, and vector mode reports `1 - cosine_distance` so
+better** in every mode; it is not a distance, and vector mode reports `1 - cosine_distance` so
 the direction stays consistent.
 
 `AskPage` calls `/ask` and renders `{answer, found, sources}`: numbered source chips when `found`,

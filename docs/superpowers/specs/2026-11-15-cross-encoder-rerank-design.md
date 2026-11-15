@@ -1,7 +1,7 @@
 # Diseño: reranking con cross-encoder
 
 **Fecha:** 2026-11-15
-**Estado:** aprobado, pendiente de plan de implementación
+**Estado:** implementado, no adoptado — el único modelo de la rejilla que superó al híbrido excede el tope de latencia (plan: docs/superpowers/plans/2026-11-15-cross-encoder-rerank.md)
 **Antecede:** `2026-07-27-rrf-reweighting-design.md` (dejó el híbrido en 20% / 66%),
 `2026-07-27-ask-endpoint-design.md` (`/ask` consume estos mismos 5 fragmentos)
 

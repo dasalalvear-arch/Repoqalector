@@ -32,9 +32,12 @@ class Settings(BaseSettings):
     # es de la familia de Gemini, asi que no se juzga a si mismo.
     judge_model: str = "openai/gpt-oss-120b"
 
-    # Cross-encoder que reordena el pool hibrido en modo "rerank". Se descarga
-    # de Hugging Face la primera vez que se usa. Para medir otro modelo sin
-    # tocar codigo: `docker compose exec -e RERANK_MODEL=<modelo> backend ...`.
+    # Cross-encoder del modo "rerank", que es solo un instrumento de medicion:
+    # de los tres modelos medidos, el unico que supero al hibrido (11/15 contra
+    # 10/15 en acierto@5) tarda 41 s por pregunta en CPU, y los dos rapidos
+    # quedaron por debajo. /search y /ask sirven "hybrid". Resultados en el
+    # README y en backend/eval/results/. Para medir otro modelo sin tocar
+    # codigo: `docker compose exec -e RERANK_MODEL=<modelo> backend ...`.
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
